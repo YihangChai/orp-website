@@ -1,120 +1,182 @@
 import Link from "next/link";
 
+const principles = [
+  "持续陪伴",
+  "认真记录",
+  "双向成长",
+];
+
 export default function AboutPage() {
   return (
     <main className="bg-[#f6f5e9] text-stone-800">
-      {/* 关于我们页面：文章式介绍页面，后续替换具体文字和图片 */}
-      <article className="mx-auto max-w-3xl px-6 py-20 md:py-28">
-        {/* 页面开头 */}
-        <header className="text-center">
+      {/* 关于我们第一部分：文章式开头，不重复首页的大背景图 */}
+      <section className="mx-auto max-w-6xl px-6 py-20 md:py-28">
+        <div className="grid gap-12 md:grid-cols-[0.9fr_1.1fr] md:items-end">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-[#2f5d50]">
+              About ORP
+            </p>
 
-          <h1 className="mt-5 text-4xl font-bold tracking-tight text-emerald-950 md:text-6xl">
-            关于我们
-          </h1>
-          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-700">
-            About ORP
-          </p>
-          <p className="mt-6 text-lg leading-8 text-stone-700 md:text-xl">
-            这里之后填写一句简洁的介绍：ORP 是谁，我们为什么开始，以及我们希望通过阅读陪伴带来什么改变。
-          </p>
-        </header>
-
-        {/* 图片占位：之后可以换成河北学生、线上课堂或 ORP 活动照片 */}
-        <div className="mt-14 overflow-hidden rounded-[2rem] border border-emerald-100 bg-white/70 p-3 shadow-sm">
-          <div className="flex h-72 items-center justify-center rounded-[1.5rem] border border-dashed border-emerald-300 bg-[#edf3df] text-stone-500">
-            图片占位区域
+            <h1 className="mt-6 text-5xl font-bold leading-tight tracking-tight text-emerald-950 md:text-7xl">
+              关于我们
+            </h1>
           </div>
+
+          <p className="text-lg leading-8 text-stone-700 md:text-xl">
+            这里之后填写一小段简洁介绍：ORP 是一个怎样的项目，我们为什么开始，
+            以及我们希望通过长期阅读陪伴建立什么样的连接。
+          </p>
         </div>
+      </section>
 
-        {/* 正文内容 */}
-        <section className="mt-16 space-y-14">
-          <section>
-            <h2 className="text-2xl font-bold text-emerald-950">
-              ORP 是什么
-            </h2>
+      {/* 关于我们第二部分：图片 + 简短故事，不做复杂模块 */}
+      <section className="mx-auto max-w-6xl px-6 pb-20">
+        <div className="grid overflow-hidden rounded-[2rem] bg-white shadow-sm md:grid-cols-[1fr_1fr]">
+          <div className="flex min-h-80 items-center justify-center bg-[#dfead2] text-stone-500">
+            关于我们图片占位区域
+          </div>
 
-            <p className="mt-5 leading-8 text-stone-700">
-              这里之后填写 ORP 的基本介绍。可以说明 ORP 的全称、服务对象、主要形式，
-              以及它和普通一次性志愿活动不同的地方。
+          <div className="flex flex-col justify-center p-8 md:p-12">
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-700">
+              Why We Started
             </p>
 
-            <p className="mt-4 leading-8 text-stone-700">
-              这里可以继续补充一段，说明 ORP 如何通过线上阅读课程连接小老师和河北学生。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-bold text-emerald-950">
+            <h2 className="mt-4 text-3xl font-bold leading-tight text-emerald-950">
               我们为什么开始
             </h2>
 
-            <p className="mt-5 leading-8 text-stone-700">
-              这里之后填写 ORP 的成立背景。可以写你们观察到的真实需求、
-              项目最初的契机，以及为什么选择从阅读陪伴开始。
+            <p className="mt-6 leading-8 text-stone-700">
+              这里之后填写 ORP 的成立背景。可以写你们最初观察到的阅读需求、
+              线上陪伴的可能性，以及为什么这个项目值得长期做下去。
             </p>
 
             <p className="mt-4 leading-8 text-stone-700">
-              这一段可以写得更有故事感，不一定要像项目介绍书一样正式。
+              这一部分不用写得很长，重点是让访客感受到 ORP 不是突然出现的活动，
+              而是从真实需求和真实关系中慢慢发展出来的项目。
             </p>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-bold text-emerald-950">
-              我们相信什么
-            </h2>
-
-            <p className="mt-5 leading-8 text-stone-700">
-              这里之后填写 ORP 的核心理念，比如持续陪伴、双向成长、尊重学生差异、
-              让阅读成为一种可以被长期接触和享受的事情。
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-bold text-emerald-950">
-              我们未来的方向
-            </h2>
-
-            <p className="mt-5 leading-8 text-stone-700">
-              这里之后填写 ORP 的未来方向。可以提到课程体系、授课记录、学生反馈、
-              数据化管理，以及这个网站为什么会被建立。
-            </p>
-          </section>
-        </section>
-
-        {/* 结尾引导 */}
-        <footer className="mt-20 border-t border-emerald-100 pt-10">
-          <p className="text-lg font-semibold text-emerald-950">
-            想继续了解 ORP？
-          </p>
-
-          <p className="mt-3 leading-7 text-stone-700">
-            你可以继续查看我们的部门介绍、参与者故事，或者了解如何加入我们。
-          </p>
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Link
-              href="/departments"
-              className="rounded-full border border-emerald-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
-            >
-              部门介绍
-            </Link>
-
-            <Link
-              href="/stories"
-              className="rounded-full border border-emerald-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
-            >
-              我和 ORP 的故事
-            </Link>
-
-            <Link
-              href="/join"
-              className="rounded-full border border-emerald-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
-            >
-              加入我们
-            </Link>
           </div>
-        </footer>
-      </article>
+        </div>
+      </section>
+
+      {/* 关于我们第三部分：深色色块，承载核心理念 */}
+      <section className="bg-[#2f5d50] text-white">
+        <div className="mx-auto max-w-4xl px-6 py-20 text-center">
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-[#8fb8a3]">
+            What We Believe
+          </p>
+
+          <h2 className="mt-5 text-3xl font-bold leading-tight md:text-5xl">
+            我们相信，阅读陪伴不是一次性的善意
+          </h2>
+
+          <p className="mt-7 text-lg leading-9 text-emerald-50">
+            这里之后可以写一句 ORP 的核心理念：阅读陪伴需要持续发生，
+            也需要被认真记录、理解和改进。每一次课程都不只是一次线上见面，
+            而是学生、小老师和项目共同成长的一部分。
+          </p>
+        </div>
+      </section>
+
+      {/* 关于我们第四部分：三个关键词，轻量表达，不重复首页 features */}
+      <section className="mx-auto max-w-6xl px-6 py-20">
+        <div className="grid gap-10 md:grid-cols-[0.8fr_1.2fr]">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-700">
+              Our Approach
+            </p>
+
+            <h2 className="mt-5 text-3xl font-bold leading-tight text-emerald-950 md:text-5xl">
+              ORP 如何理解陪伴
+            </h2>
+          </div>
+
+          <div>
+            <p className="leading-8 text-stone-700">
+              这里之后可以用一小段话说明 ORP 的工作方式。不要写得太像功能介绍，
+              而是解释这个项目如何看待学生、小老师、课程记录和长期成长之间的关系。
+            </p>
+
+            <div className="mt-8 flex flex-wrap gap-3">
+              {principles.map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full border border-emerald-200 bg-white/70 px-5 py-2 text-sm font-semibold text-emerald-800"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+
+            <div className="mt-10 space-y-8 border-t border-emerald-200 pt-8">
+              <section>
+                <h3 className="text-2xl font-bold text-emerald-950">
+                  对学生
+                </h3>
+
+                <p className="mt-3 leading-8 text-stone-700">
+                  这里之后填写 ORP 希望给学生带来的支持，例如阅读兴趣、表达机会、
+                  稳定陪伴和更持续的学习体验。
+                </p>
+              </section>
+
+              <section>
+                <h3 className="text-2xl font-bold text-emerald-950">
+                  对小老师
+                </h3>
+
+                <p className="mt-3 leading-8 text-stone-700">
+                  这里之后填写小老师在 ORP 中的成长，例如备课、沟通、反思、
+                  责任感和对教育问题的理解。
+                </p>
+              </section>
+
+              <section>
+                <h3 className="text-2xl font-bold text-emerald-950">
+                  对项目
+                </h3>
+
+                <p className="mt-3 leading-8 text-stone-700">
+                  这里之后填写为什么 ORP 需要课程记录、反馈和网站系统：
+                  让项目不只依靠热情，也能依靠清晰的流程持续运行。
+                </p>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 关于我们第五部分：结尾引导，保持简单 */}
+      <section className="bg-[#f6f5e9]">
+        <div className="mx-auto max-w-6xl px-6 pb-20">
+          <div className="rounded-[2rem] bg-emerald-950 px-8 py-10 text-white md:flex md:items-center md:justify-between md:px-12">
+            <div>
+              <h2 className="text-3xl font-bold">
+                想继续了解 ORP？
+              </h2>
+
+              <p className="mt-3 leading-7 text-emerald-50">
+                可以查看部门介绍、项目故事，或者了解如何加入我们。
+              </p>
+            </div>
+
+            <div className="mt-8 flex flex-wrap gap-3 md:mt-0">
+              <Link
+                href="/departments"
+                className="rounded-full bg-amber-200 px-6 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-amber-100"
+              >
+                部门介绍
+              </Link>
+
+              <Link
+                href="/stories"
+                className="rounded-full border border-white/40 px-6 py-3 font-semibold text-white hover:bg-white/10"
+              >
+                ORP 故事
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
