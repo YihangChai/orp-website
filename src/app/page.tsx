@@ -311,3 +311,4 @@ export default function HomePage() {
     </main>
   );
 }
+//把our mission加到关于我们里面，这样首页干净一点
