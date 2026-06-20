@@ -17,8 +17,8 @@ export default function Navbar() {
         <Link href="/donation">资助我们</Link>
       </nav>
 
-      <Link href="/teacher" className="startButton">
-        开始
+      <Link href="/login" className="startButton">
+        登陆
       </Link>
     </header>
   );
