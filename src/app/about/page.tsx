@@ -1,8 +1,8 @@
 export default function PageName() {
   return (
     <main>
-      <h1>Admin</h1>
-      <p>...</p>
+      <h1>About Us</h1>
+      <p>Here is ORP's core values...</p>
     </main>
   );
 }
