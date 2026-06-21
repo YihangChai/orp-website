@@ -136,47 +136,13 @@ export default function AboutPage() {
                 </h3>
 
                 <p className="mt-3 leading-8 text-stone-700">
-                  这里之后填写为什么 ORP 需要课程记录、反馈和网站系统：
-                  让项目不只依靠热情，也能依靠清晰的流程持续运行。
+                  这里之后填写ORP的发展方向
                 </p>
               </section>
             </div>
           </div>
         </div>
       </section>
-
-      {/* 关于我们第五部分：结尾引导，保持简单 */}
-      <section className="bg-[#f6f5e9]">
-        <div className="mx-auto max-w-6xl px-6 pb-20">
-          <div className="rounded-[2rem] bg-emerald-950 px-8 py-10 text-white md:flex md:items-center md:justify-between md:px-12">
-            <div>
-              <h2 className="text-3xl font-bold">
-                想继续了解 ORP？
-              </h2>
-
-              <p className="mt-3 leading-7 text-emerald-50">
-                可以查看部门介绍、项目故事，或者了解如何加入我们。
-              </p>
-            </div>
-
-            <div className="mt-8 flex flex-wrap gap-3 md:mt-0">
-              <Link
-                href="/departments"
-                className="rounded-full bg-amber-200 px-6 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-amber-100"
-              >
-                部门介绍
-              </Link>
-
-              <Link
-                href="/stories"
-                className="rounded-full border border-white/40 px-6 py-3 font-semibold text-white hover:bg-white/10"
-              >
-                ORP 故事
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
+     </main>
   );
 }

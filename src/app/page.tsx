@@ -101,14 +101,14 @@ export default function HomePage() {
             {isLoggedIn ? (
               <Link
                 href={getDashboardPath(userRole)}
-                className="rounded-full bg-amber-200 px-7 py-3 text-base font-semibold text-emerald-950 shadow-sm hover:bg-amber-100"
+                className="rounded-full bg-[#cfe8d6] px-7 py-3 text-base font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8]"
               >
                 进入系统
               </Link>
             ) : (
               <Link
                 href="/about"
-                className="rounded-full bg-amber-200 px-7 py-3 text-base font-semibold text-emerald-950 shadow-sm hover:bg-amber-100"
+                className="rounded-full bg-[#cfe8d6] px-7 py-3 text-base font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8]"
               >
                 了解 ORP
               </Link>
@@ -299,7 +299,7 @@ export default function HomePage() {
             <div className="mt-8 flex flex-wrap gap-3 md:mt-0">
               <Link
                 href="/about"
-                className="rounded-full bg-amber-200 px-6 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-amber-100"
+                className="rounded-full bg-[#cfe8d6] px-7 py-3 text-base font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8]"
               >
                 关于我们
               </Link>
