@@ -1,21 +1,34 @@
+"use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { FormEvent, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+const DEMO_TEACHER_ID = "11111111-1111-1111-1111-111111111111";
 
 const classInfo = {
+  id: "22222222-2222-2222-2222-222222222222",
   name: "秋叶班",
   teacher: "小老师姓名",
 };
 
+const goals = [
+  {
+    id: "33333333-3333-3333-3333-333333333333",
+    name: "小王子阅读计划",
+  },
+];
+
 const students = [
   {
-    id: "student-a",
+    id: "44444444-4444-4444-4444-444444444444",
     name: "学生 A",
   },
   {
-    id: "student-b",
+    id: "55555555-5555-5555-5555-555555555555",
     name: "学生 B",
   },
   {
-    id: "student-c",
+    id: "66666666-6666-6666-6666-666666666666",
     name: "学生 C",
   },
 ];
@@ -27,6 +40,86 @@ function getTodayDate() {
 
 export default function NewRecordPage() {
   const today = getTodayDate();
+  const router = useRouter();
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setIsSubmitting(true);
+    setMessage("");
+
+    const formData = new FormData(event.currentTarget);
+
+    const lessonDate = String(formData.get("lesson_date") || "");
+    const durationMinutes = Number(formData.get("duration_minutes"));
+    const goalId = String(formData.get("goal_id") || "");
+    const lessonTitle = String(formData.get("lesson_title") || "");
+    const lessonContentAndFeedback = String(
+      formData.get("lesson_content_and_feedback") || ""
+    );
+    const homework = String(formData.get("homework") || "");
+    const nextPlan = String(formData.get("next_plan") || "");
+    const materialLink = String(formData.get("material_link") || "");
+    const teacherReflection = String(formData.get("teacher_reflection") || "");
+
+    const presentStudentIds = formData.getAll("attendance").map(String);
+
+    if (!lessonDate || !durationMinutes || !lessonTitle || !lessonContentAndFeedback) {
+      setMessage("请填写上课日期、授课时长、本节课主题和课程内容。");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const lessonRecordId = crypto.randomUUID();
+
+    const { error: lessonError } = await supabase
+      .from("lesson_records")
+      .insert({
+        id: lessonRecordId,
+        teacher_id: DEMO_TEACHER_ID,
+        class_id: classInfo.id,
+        goal_id: goalId || null,
+        lesson_date: lessonDate,
+        duration_minutes: durationMinutes,
+        lesson_title: lessonTitle,
+        lesson_content_and_feedback: lessonContentAndFeedback,
+        homework: homework || null,
+        next_plan: nextPlan || null,
+        material_link: materialLink || null,
+        teacher_reflection: teacherReflection || null,
+      });
+
+    if (lessonError) {
+      console.error(lessonError);
+      setMessage(`保存课程记录失败：${lessonError.message}`);
+      setIsSubmitting(false);
+      return;
+    }
+
+    const attendanceRows = students.map((student) => ({
+      lesson_record_id: lessonRecordId,
+      student_id: student.id,
+      is_present: presentStudentIds.includes(student.id),
+    }));
+
+    const { error: attendanceError } = await supabase
+      .from("lesson_attendance")
+      .insert(attendanceRows);
+
+    if (attendanceError) {
+      console.error(attendanceError);
+      setMessage(`课程记录已保存，但出勤保存失败：${attendanceError.message}`);
+      setIsSubmitting(false);
+      return;
+    }
+      setMessage("保存成功！正在返回小老师主页...");
+      setIsSubmitting(false);
+      router.push("/teacher");
+      router.refresh();
+  }
 
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
@@ -50,7 +143,7 @@ export default function NewRecordPage() {
         </div>
 
         <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
-          <form className="space-y-7">
+          <form onSubmit={handleSubmit} className="space-y-7">
             {/* 基本信息 */}
             <section>
               <h2 className="text-2xl font-bold text-emerald-950">
@@ -80,9 +173,17 @@ export default function NewRecordPage() {
                     所属课程目标
                   </label>
 
-                  <select className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500">
-                    <option>小王子阅读计划</option>
-                    <option>暂不绑定目标</option>
+                  <select
+                    name="goal_id"
+                    defaultValue={goals[0].id}
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                  >
+                    {goals.map((goal) => (
+                      <option key={goal.id} value={goal.id}>
+                        {goal.name}
+                      </option>
+                    ))}
+                    <option value="">暂不绑定目标</option>
                   </select>
                 </div>
 
@@ -93,6 +194,7 @@ export default function NewRecordPage() {
 
                   <input
                     type="date"
+                    name="lesson_date"
                     defaultValue={today}
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
                   />
@@ -109,6 +211,7 @@ export default function NewRecordPage() {
 
                   <input
                     type="number"
+                    name="duration_minutes"
                     placeholder="例如：40"
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
                   />
@@ -121,6 +224,7 @@ export default function NewRecordPage() {
 
                   <input
                     type="text"
+                    name="lesson_title"
                     placeholder="例如：小王子第一章 / 自我介绍与阅读导入"
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
                   />
@@ -176,6 +280,7 @@ export default function NewRecordPage() {
                   </label>
 
                   <textarea
+                    name="lesson_content_and_feedback"
                     rows={6}
                     placeholder="记录本节课讲了什么、学生整体理解情况、互动情况、哪里做得好、哪里需要继续练习。"
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
@@ -189,6 +294,7 @@ export default function NewRecordPage() {
                     </label>
 
                     <textarea
+                      name="homework"
                       rows={3}
                       placeholder="例如：复习关键词，完成一段复述。"
                       className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
@@ -201,6 +307,7 @@ export default function NewRecordPage() {
                     </label>
 
                     <textarea
+                      name="next_plan"
                       rows={3}
                       placeholder="例如：继续阅读下一章，加入开放式问题。"
                       className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
@@ -215,6 +322,7 @@ export default function NewRecordPage() {
 
                   <input
                     type="url"
+                    name="material_link"
                     placeholder="https://..."
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
                   />
@@ -242,6 +350,7 @@ export default function NewRecordPage() {
                 </div>
 
                 <textarea
+                  name="teacher_reflection"
                   rows={4}
                   placeholder="例如：这节课哪里顺利？哪里需要调整？下次如何改进？有没有需要管理员或课程部帮助的地方？"
                   className="mt-5 w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 leading-7 outline-none focus:border-emerald-500"
@@ -252,16 +361,23 @@ export default function NewRecordPage() {
             {/* 保存 */}
             <div className="flex flex-col gap-3 border-t border-emerald-100 pt-6 md:flex-row md:items-center md:justify-between">
               <p className="text-sm leading-6 text-stone-500">
-                当前版本只显示表单，不会真正提交。下一步会连接 Supabase 保存记录。
+                当前版本会把课程记录保存到 Supabase。正式账号系统完成后，班级和老师信息会自动来自登录身份。
               </p>
 
               <button
-                type="button"
-                className="rounded-full bg-[#cfe8d6] px-7 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8]"
+                type="submit"
+                disabled={isSubmitting}
+                className="rounded-full bg-[#cfe8d6] px-7 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                保存记录
+                {isSubmitting ? "保存中..." : "保存记录"}
               </button>
             </div>
+
+            {message && (
+              <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] px-5 py-4 text-sm font-semibold text-emerald-900">
+                {message}
+              </div>
+            )}
           </form>
         </section>
       </div>

@@ -1,4 +1,14 @@
 import Link from "next/link";
+import { supabase } from "@/lib/supabaseClient"
+const DEMO_TEACHER_ID = "11111111-1111-1111-1111-111111111111"
+
+type LessonRecord = {
+    id: string;
+    lesson_date: string;
+    duration_minutes: number;
+    lesson_title: string;
+    lesson_content_and_feedback: string;
+};
 
 const students = [
   {
@@ -23,27 +33,18 @@ const goals = [
   },
 ];
 
-const lessonRecords = [
-  {
-    date: "2026-06-23",
-    student: "学生n/n",
-    title: "小王子阅读课：第一章",
-    duration: "40 分钟",
-    feedback:
-      "学生能够跟上主要情节，但在表达自己的理解时还需要更多引导。",
-  },
-  {
-    date: "2026-06-16",
-    student: "学生n/n",
-    title: "阅读导入与自我介绍",
-    duration: "40 分钟",
-    feedback:
-      "完成了基本介绍和阅读兴趣了解，后续可以选择更适合学生水平的材料。",
-  },
-];
 
-export default function TeacherPage() {
-  return (
+export const dynamic = "force-dynamic";
+
+export default async function TeacherPage() {
+    const {data:lessonRecordsFromSupabase, error } = await supabase
+        .from("lesson_records")
+        .select("id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback")
+        .eq("teacher_id", DEMO_TEACHER_ID)
+        .order("lesson_date", {ascending: false})
+        .limit(4);
+    const realLessonRecords = (lessonRecordsFromSupabase || []) as LessonRecord[];
+    return (
     <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
       <div className="mx-auto max-w-7xl">
         <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -152,7 +153,7 @@ export default function TeacherPage() {
                   href="/teacher/goals"
                   className="w-fit rounded-full border border-emerald-200 px-5 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
                 >
-                  查看全部目标
+                  查看全部
                 </Link>
               </div>
 
@@ -195,9 +196,6 @@ export default function TeacherPage() {
                     最近授课记录
                   </h2>
 
-                  <p className="mt-3 leading-7 text-stone-600">
-                    这里之后会从 Supabase 的 lesson_records 表读取当前小老师的记录。
-                  </p>
                 </div>
 
                 <Link
@@ -209,41 +207,40 @@ export default function TeacherPage() {
               </div>
 
               <div className="mt-8 space-y-5">
-                {lessonRecords.map((record) => (
-                  <article
-                    key={`${record.date}-${record.title}`}
-                    className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-6"
-                  >
-                    <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                      <div>
-                        <p className="text-sm font-semibold text-emerald-700">
-                          {record.date}｜{record.duration}
-                        </p>
-
-                        <h3 className="mt-2 text-2xl font-bold text-emerald-950">
-                          {record.title}
-                        </h3>
-                      </div>
-
-                      <p className="w-fit rounded-full bg-[#f6f5e9] px-4 py-2 text-sm font-semibold text-stone-600">
-                        {record.student}
-                      </p>
+                {realLessonRecords.length === 0 ? (
+                    <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-6">
                     </div>
+                ) : (
+                    realLessonRecords.map((record) => (
+                        <article
+                            key={record.id}
+                            className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-6"
+                        >
+                            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                                <div>
+                                    <p className="text-sm font-semibold text-emerald-700">
+                                        {record.lesson_date}｜{record.duration_minutes} 分钟
+                                    </p>
 
-                    <p className="mt-4 leading-8 text-stone-700">
-                      {record.feedback}
-                    </p>
-                  </article>
-                ))}
+                                    <h3 className="mt-2 text-2xl font-bold text-emerald-950">
+                                        {record.lesson_title}
+                                    </h3>
+                                </div>
+
+                                <p className="w-fit rounded-full bg-[#f6f5e9] px-4 py-2 text-sm font-semibold text-stone-600">
+                                    秋叶班
+                                </p>
+                            </div>
+
+                            <p className="mt-4 leading-8 text-stone-700">
+                                {record.lesson_content_and_feedback}
+                            </p>
+                        </article>
+                    ))
+                )}
               </div>
 
               <div className="mt-8 flex justify-center border-t border-emerald-100 pt-6">
-                <Link
-                  href="/teacher/records"
-                  className="rounded-full border border-emerald-200 bg-[#f6f5e9] px-6 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
-                >
-                  展开全部授课记录
-                </Link>
               </div>
             </section>
           </section>
