@@ -76,7 +76,7 @@ export default function HomePage() {
 
       {/* 深色遮罩：用黑色/深灰代替绿色，避免照片变浑浊 */}
 
-      <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-black/20" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/40 to-black/5" />
 
       <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center px-6 py-24">
           <div className="max-w-3xl">
