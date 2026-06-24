@@ -174,10 +174,10 @@ export default async function TeacherPage() {
 
               <div className="mt-5 space-y-3">
                 <Link
-                  href="/teacher/goals"
+                  href="/teacher/all-records"
                   className="block rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
                 >
-                  查看全部目标
+                  查看全部记录
                 </Link>
 
                 <Link
