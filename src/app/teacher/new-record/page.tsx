@@ -138,7 +138,7 @@ export default function NewRecordPage() {
 
           <p className="mt-4 leading-8 text-stone-600">
             请记录本节课的基本信息、出勤情况、课程内容和后续计划。
-            学生反馈会在课程记录生成后由学生单独留言，不需要老师在这里填写。
+            学生反馈会在课程记录生成后由学生单独留言。
           </p>
         </div>
 

@@ -42,6 +42,7 @@ export default async function TeacherPage() {
         .select("id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback")
         .eq("teacher_id", DEMO_TEACHER_ID)
         .order("lesson_date", {ascending: false})
+        .order("created_at", { ascending: false })
         .limit(4);
     const realLessonRecords = (lessonRecordsFromSupabase || []) as LessonRecord[];
     return (
@@ -118,6 +119,13 @@ export default async function TeacherPage() {
               </p>
               <div className="mt-5 space-y-3">
                 <Link
+                  href="/teacher/goals"
+                  className="block rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
+                >
+                  查看全部
+                </Link>
+
+                <Link
                   href="/teacher/stats"
                   className="block rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
                 >
@@ -140,21 +148,11 @@ export default async function TeacherPage() {
             <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
               <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
                 <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
-                    Current Goals
-                  </p>
-
                   <h2 className="mt-3 text-3xl font-bold text-emerald-950">
                     当前课程目标
                   </h2>
                 </div>
 
-                <Link
-                  href="/teacher/goals"
-                  className="w-fit rounded-full border border-emerald-200 px-5 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
-                >
-                  查看全部
-                </Link>
               </div>
 
               <div className="mt-7 space-y-5">
