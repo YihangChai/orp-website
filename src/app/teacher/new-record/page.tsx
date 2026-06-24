@@ -1,9 +1,15 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 const DEMO_TEACHER_ID = "11111111-1111-1111-1111-111111111111";
+
+type TeachingGoal = {
+  id: string;
+  title: string;
+  expected_lessons: number | null;
+};
 
 const classInfo = {
   id: "22222222-2222-2222-2222-222222222222",
@@ -11,12 +17,6 @@ const classInfo = {
   teacher: "小老师姓名",
 };
 
-const goals = [
-  {
-    id: "33333333-3333-3333-3333-333333333333",
-    name: "小王子阅读计划",
-  },
-];
 
 const students = [
   {
@@ -41,9 +41,34 @@ function getTodayDate() {
 export default function NewRecordPage() {
   const today = getTodayDate();
   const router = useRouter();
-
+  const [goals, setGoals] = useState<TeachingGoal[]>([]);
+  const [isLoadingGoals, setIsLoadingGoals] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    async function loadGoals() {
+      setIsLoadingGoals(true);
+
+      const { data, error } = await supabase
+        .from("teaching_goals")
+        .select("id, title, expected_lessons")
+        .eq("teacher_id", DEMO_TEACHER_ID)
+        .eq("status", "active")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        setMessage(`读取教学目标失败：${error.message}`);
+        setIsLoadingGoals(false);
+        return;
+      }
+
+      setGoals((data || []) as TeachingGoal[]);
+      setIsLoadingGoals(false);
+    }
+
+    loadGoals();
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -175,15 +200,18 @@ export default function NewRecordPage() {
 
                   <select
                     name="goal_id"
-                    defaultValue={goals[0].id}
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                    disabled={isLoadingGoals}
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
+                    <option value="">
+                      {isLoadingGoals ? "正在读取教学目标..." : "不关联教学目标"}
+                    </option>
                     {goals.map((goal) => (
                       <option key={goal.id} value={goal.id}>
-                        {goal.name}
+                        {goal.title}
+                        {goal.expected_lessons ? `（计划 ${goal.expected_lessons} 节）` : ""}
                       </option>
                     ))}
-                    <option value="">暂不绑定目标</option>
                   </select>
                 </div>
 
