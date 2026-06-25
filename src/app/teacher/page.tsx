@@ -146,7 +146,7 @@ export default async function TeacherPage() {
 
             <section className="rounded-[2rem] border border-emerald-100 bg-[#fffdf4] p-7 shadow-sm">
               <h2 className="mt-3 text-2xl font-bold text-emerald-950">
-                我的学生
+                我的班级
               </h2>
 
               <div className="mt-5 space-y-4">
