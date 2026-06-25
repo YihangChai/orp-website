@@ -2,9 +2,17 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabaseClient";
 
+
 const DEMO_STUDENT_ID = "77777777-7777-7777-7777-777777777777";
 const DEMO_STUDENT_NAME = "学生 A";
 const DEMO_CLASS_ID = "22222222-2222-2222-2222-222222222222";
+
+const studentInfo = {
+  name: DEMO_STUDENT_NAME,
+  className: "秋叶班",
+  classmateName: "学生 A",
+  teacherName: "小老师姓名",
+};
 
 type TeachingGoal = {
   id: string;
@@ -80,62 +88,108 @@ export default async function StudentPage() {
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
       <section className="mx-auto max-w-4xl">
-        <div className="rounded-[2rem] bg-[#2f5d50] px-6 py-8 text-white shadow-sm md:px-8">
-          <p className="text-sm font-semibold text-[#d8b99a]">
-            ORP 学习空间
-          </p>
+        <section className="grid gap-5 md:grid-cols-[0.8fr_1.4fr]">
+          <aside className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+            <div className="flex items-center gap-4">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#2f5d50] text-2xl font-bold text-white">
+                {studentInfo.name.slice(0, 1)}
+              </div>
 
-          <h1 className="mt-3 text-3xl font-bold">你好，{DEMO_STUDENT_NAME}</h1>
+              <div>
+                <p className="text-sm font-semibold text-emerald-700">
+                  我的学习信息
+                </p>
 
-          <p className="mt-4 max-w-2xl leading-8 text-emerald-50">
-            这里会帮你记住最近学了什么、课后要做什么，也可以给小老师留一句话。
-          </p>
-        </div>
+                <h2 className="mt-1 text-2xl font-bold text-emerald-950">
+                  {studentInfo.name}
+                </h2>
+              </div>
+            </div>
 
-        <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <h2 className="text-xl font-bold text-emerald-950">
-            你正在学习
-          </h2>
+            <div className="mt-5 space-y-3">
+              <div className="rounded-2xl bg-[#fffdf4] px-4 py-3">
+                <p className="text-xs text-stone-500">班级</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-950">
+                  {studentInfo.className}
+                </p>
+              </div>
 
-          {currentGoal ? (
-            <div className="mt-4 rounded-2xl bg-[#fffdf4] p-5">
-              <p className="text-2xl font-bold text-emerald-950">
-                {currentGoal.title}
-              </p>
+              <div className="rounded-2xl bg-[#fffdf4] px-4 py-3">
+                <p className="text-xs text-stone-500">同学</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-950">
+                  {studentInfo.classmateName}
+                </p>
+              </div>
 
-              {currentGoal.description && (
-                <p className="mt-3 leading-7 text-stone-600">
-                  {currentGoal.description}
+              <div className="rounded-2xl bg-[#fffdf4] px-4 py-3">
+                <p className="text-xs text-stone-500">小老师</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-950">
+                  {studentInfo.teacherName}
+                </p>
+              </div>
+            </div>
+          </aside>
+
+          <section className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+            <p className="text-sm font-semibold text-[#2f5d50]">
+              ORP 学习空间
+            </p>
+
+            <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+              你好，{DEMO_STUDENT_NAME}
+            </h1>
+
+            <p className="mt-3 text-sm leading-7 text-stone-600">
+              这里会帮你记住最近学了什么、课后要做什么，也可以给小老师留一句话。
+            </p>
+
+            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-5">
+              <h2 className="text-lg font-bold text-emerald-950">
+                你正在学习
+              </h2>
+
+              {currentGoal ? (
+                <div className="mt-3">
+                  <p className="text-2xl font-bold text-emerald-950">
+                    {currentGoal.title}
+                  </p>
+
+                  {currentGoal.description && (
+                    <p className="mt-3 text-sm leading-7 text-stone-600">
+                      {currentGoal.description}
+                    </p>
+                  )}
+
+                  <p className="mt-4 text-sm font-semibold text-emerald-800">
+                    我们已经一起完成了 {completedLessonsForCurrentGoal} /{" "}
+                    {expectedLessons || "?"} 节课
+                  </p>
+
+                  {expectedLessons > 0 && (
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100">
+                      <div
+                        className="h-full rounded-full bg-[#2f5d50]"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            Math.round(
+                              (completedLessonsForCurrentGoal /
+                                expectedLessons) *
+                                100
+                            )
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm leading-7 text-stone-600">
+                  目前还没有正在进行的学习计划。
                 </p>
               )}
-
-              <p className="mt-4 text-sm font-semibold text-emerald-800">
-                我们已经一起完成了 {completedLessonsForCurrentGoal} /{" "}
-                {expectedLessons || "?"} 节课
-              </p>
-
-              {expectedLessons > 0 && (
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100">
-                  <div
-                    className="h-full rounded-full bg-[#2f5d50]"
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        Math.round(
-                          (completedLessonsForCurrentGoal / expectedLessons) *
-                            100
-                        )
-                      )}%`,
-                    }}
-                  />
-                </div>
-              )}
             </div>
-          ) : (
-            <p className="mt-4 rounded-2xl bg-[#fffdf4] p-5 leading-7 text-stone-600">
-              目前还没有正在进行的学习计划。
-            </p>
-          )}
+          </section>
         </section>
 
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
@@ -240,20 +294,23 @@ export default async function StudentPage() {
             </p>
           )}
         </section>
-      </section>
-      
-      <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-        <h2 className="text-xl font-bold text-emerald-950">家长查看</h2>
-        <p className="mt-2 text-sm leading-7 text-stone-600">
-            家长可以查看孩子最近的学习情况、课程记录和学习计划，也可以给 ORP 留下一条反馈。
-        </p>
-        <Link
+
+        <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+          <h2 className="text-xl font-bold text-emerald-950">家长模式</h2>
+
+          <p className="mt-2 text-sm leading-7 text-stone-600">
+            家长可以查看孩子最近的学习情况、课程记录和学习计划，也可以给
+            ORP 留下一些反馈。
+          </p>
+
+          <Link
             href="/student/parent"
             className="mt-4 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
-        >
+          >
             进入家长模式
-        </Link>
+          </Link>
         </section>
+      </section>
     </main>
   );
 }

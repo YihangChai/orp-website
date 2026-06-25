@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabaseClient";
+import DeleteStudentCommentButton from "@/components/DeleteStudentCommentButton";
 
 const DEMO_STUDENT_ID = "77777777-7777-7777-7777-777777777777";
 const DEMO_STUDENT_NAME = "学生 A";
@@ -193,13 +194,14 @@ export default async function StudentLessonsPage() {
                           {lessonComments.length > 0 ? (
                             <div className="mt-3 space-y-3">
                               {lessonComments.map((comment) => (
-                                <div
-                                  key={comment.id}
-                                  className="rounded-xl bg-white p-4"
-                                >
+                                <div key={comment.id} className="flex items-start justify-between gap-3 rounded-xl bg-white p-4">
                                   <p className="text-sm leading-7 text-stone-700">
                                     {comment.comment}
                                   </p>
+                                  <DeleteStudentCommentButton
+                                    commentId={comment.id}
+                                    studentId={DEMO_STUDENT_ID}
+                                  />
                                 </div>
                               ))}
                             </div>
