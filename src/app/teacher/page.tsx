@@ -108,13 +108,6 @@ export default async function TeacherPage() {
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <h1 className="mt-3 text-4xl font-bold text-emerald-950">
-              小老师主页
-            </h1>
-          </div>
-        </div>
 
         <div className="grid gap-8 lg:grid-cols-[320px_1fr]">
           <aside className="space-y-6">
