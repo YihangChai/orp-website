@@ -1,0 +1,283 @@
+// ======================================================
+// Supabase 基础语法笔记：读取、加入、修改数据
+// 你可以把 Supabase 理解成：在线 Excel 表格 + API
+// ======================================================
+
+import { supabase } from "@/lib/supabaseClient";
+
+// ------------------------------------------------------
+// 0. 基本格式
+// ------------------------------------------------------
+
+// 每次和 Supabase 交互，基本都是这个结构：
+async function basicShape() {
+  const { data, error } = await supabase
+    .from("table_name") // 选择哪一张表
+    .select("*"); // 做什么操作：select / insert / update / delete
+
+  // data = 成功拿到的数据
+  // error = 如果失败，Supabase 给你的错误信息
+}
+
+// ------------------------------------------------------
+// 1. 读取数据：select
+// ------------------------------------------------------
+
+async function readLessonRecords() {
+  const { data: recordsFromSupabase, error } = await supabase
+    .from("lesson_records") // 从 lesson_records 表读取
+    .select(
+      "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback"
+    ) // 明确写要读哪些字段，不要总是用 *
+    .eq("teacher_id", "11111111-1111-1111-1111-111111111111") // 只读取这个老师的记录
+    .order("lesson_date", { ascending: false }) // 按日期从新到旧排序
+    .limit(3); // 只拿前三条
+
+  if (error) {
+    console.log("读取失败：", error.message);
+    return [];
+  }
+
+  // Supabase 可能返回 null，所以用 || [] 保底
+  const records = recordsFromSupabase || [];
+
+  return records;
+}
+
+// ------------------------------------------------------
+// 2. 读取单条数据：select + eq + single
+// ------------------------------------------------------
+
+async function readOneGoal(goalId: string) {
+  const { data: goal, error } = await supabase
+    .from("teaching_goals")
+    .select("id, title, description, start_date, expected_lessons, status")
+    .eq("id", goalId) // 只找 id 等于 goalId 的那一条
+    .single(); // 我确定只会返回一条，所以直接给我一个对象，不要数组
+
+  if (error) {
+    console.log("读取目标失败：", error.message);
+    return null;
+  }
+
+  return goal;
+}
+
+// ------------------------------------------------------
+// 3. 新增数据：insert
+// ------------------------------------------------------
+
+async function createGoal() {
+  const { error } = await supabase.from("teaching_goals").insert({
+    teacher_id: "11111111-1111-1111-1111-111111111111",
+    title: "小王子阅读计划",
+    description: "计划用几节课带学生读完小王子的一部分内容。",
+    start_date: "2026-06-25",
+    expected_lessons: 5,
+    status: "active",
+  });
+
+  if (error) {
+    console.log("创建目标失败：", error.message);
+  }
+}
+
+// insert 的核心格式：
+// supabase.from("表名").insert({
+//   字段1: 值1,
+//   字段2: 值2,
+// });
+
+// ------------------------------------------------------
+// 4. 新增课程记录：insert 另一张表
+// ------------------------------------------------------
+
+async function createLessonRecord(goalId: string | null) {
+  const { error } = await supabase.from("lesson_records").insert({
+    teacher_id: "11111111-1111-1111-1111-111111111111",
+    class_id: "22222222-2222-2222-2222-222222222222",
+
+    // 如果选择了目标，就存目标 id；如果没选目标，就存 null
+    goal_id: goalId || null,
+
+    lesson_date: "2026-06-25",
+    duration_minutes: 40,
+    lesson_title: "小王子第一课",
+    lesson_content_and_feedback: "今天介绍了故事背景，学生对星球设定很感兴趣。",
+
+    // 空内容建议存 null，不要存空字符串
+    homework: null,
+    next_plan: "下次继续讲玫瑰和小王子的关系。",
+    material_link: null,
+    teacher_reflection: "这节课互动不错，但提问可以再具体一点。",
+  });
+
+  if (error) {
+    console.log("创建课程记录失败：", error.message);
+  }
+}
+
+// ------------------------------------------------------
+// 5. 修改数据：update
+// ------------------------------------------------------
+
+async function updateGoal(goalId: string) {
+  const { error } = await supabase
+    .from("teaching_goals")
+    .update({
+      title: "修改后的小王子阅读计划",
+      description: "根据实际进度，把计划调整得更清楚。",
+      expected_lessons: 6,
+    })
+    .eq("id", goalId) // 只修改这个目标
+    .neq("status", "completed"); // 如果目标已经结束，就不要修改
+
+  if (error) {
+    console.log("修改目标失败：", error.message);
+  }
+}
+
+// update 最重要的规则：一定要加条件。
+// 危险写法：
+// supabase.from("teaching_goals").update({ status: "completed" });
+// 这可能会改整张表。
+//
+// 安全写法：
+// supabase.from("teaching_goals").update({ status: "completed" }).eq("id", goalId);
+
+// ------------------------------------------------------
+// 6. 删除数据：delete
+// ------------------------------------------------------
+
+// 现在 ORP 暂时不做课程记录删除，但语法是这样：
+async function deleteGoal(goalId: string) {
+  const { error } = await supabase
+    .from("teaching_goals")
+    .delete()
+    .eq("id", goalId); // 删除也必须加条件
+
+  if (error) {
+    console.log("删除失败：", error.message);
+  }
+}
+
+// ------------------------------------------------------
+// 7. data 改名：data: xxx
+// ------------------------------------------------------
+
+async function dataRenameExample() {
+  const { data: goalsFromSupabase } = await supabase
+    .from("teaching_goals")
+    .select("id, title");
+
+  const { data: recordsFromSupabase } = await supabase
+    .from("lesson_records")
+    .select("id, lesson_title");
+
+  // data: goalsFromSupabase 的意思是：
+  // 把 Supabase 返回的 data 改名叫 goalsFromSupabase。
+  // 因为一个页面可能查很多表，全部叫 data 会很乱。
+}
+
+// ------------------------------------------------------
+// 8. Map：用 id 快速找到对应数据
+// ------------------------------------------------------
+
+type TeachingGoal = {
+  id: string;
+  title: string;
+};
+
+type LessonRecord = {
+  id: string;
+  goal_id: string | null;
+  lesson_title: string;
+};
+
+function mapExample(goals: TeachingGoal[], records: LessonRecord[]) {
+  const goalMap = new Map<string, TeachingGoal>();
+
+  goals.forEach((goal) => {
+    goalMap.set(goal.id, goal);
+  });
+
+  records.forEach((record) => {
+    const relatedGoal = record.goal_id
+      ? goalMap.get(record.goal_id)
+      : null;
+
+    console.log(record.lesson_title, relatedGoal?.title || "未关联目标");
+  });
+}
+
+// Map 可以理解成一本字典：
+// goal.id -> goal
+// 这样课程记录里只有 goal_id，也能快速找到目标标题。
+
+// ------------------------------------------------------
+// 9. 按课程记录分组学生留言
+// ------------------------------------------------------
+
+type StudentLessonComment = {
+  id: string;
+  lesson_record_id: string;
+  student_name: string | null;
+  comment: string;
+};
+
+function groupCommentsByLesson(comments: StudentLessonComment[]) {
+  const commentsByLesson = new Map<string, StudentLessonComment[]>();
+
+  comments.forEach((comment) => {
+    const existingComments =
+      commentsByLesson.get(comment.lesson_record_id) || [];
+
+    commentsByLesson.set(comment.lesson_record_id, [
+      ...existingComments,
+      comment,
+    ]);
+  });
+
+  return commentsByLesson;
+}
+
+// 原始留言可能是：
+// 留言 1 -> 课程 A
+// 留言 2 -> 课程 A
+// 留言 3 -> 课程 B
+//
+// 分组后变成：
+// 课程 A -> [留言 1, 留言 2]
+// 课程 B -> [留言 3]
+
+// ------------------------------------------------------
+// 10. 三个最常用模板
+// ------------------------------------------------------
+
+// 读取：
+async function templateRead() {
+  const { data, error } = await supabase
+    .from("表名")
+    .select("字段1, 字段2")
+    .eq("某字段", "某个值")
+    .order("排序字段", { ascending: false });
+}
+
+// 新增：
+async function templateInsert() {
+  const { error } = await supabase.from("表名").insert({
+    字段1: "值1",
+    字段2: "值2",
+  });
+}
+
+// 修改：
+async function templateUpdate(id: string) {
+  const { error } = await supabase
+    .from("表名")
+    .update({
+      字段1: "新值1",
+      字段2: "新值2",
+    })
+    .eq("id", id);
+}

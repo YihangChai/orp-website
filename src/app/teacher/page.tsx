@@ -256,7 +256,7 @@ export default async function TeacherPage() {
 
                             <div className="flex items-center gap-3">
                               <Link
-                                href={`/teacher/goals/${goal.id}/edit`}
+                                href={`/teacher/edit-goal/${goal.id}`}
                                 className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
                               >
                                 修改
