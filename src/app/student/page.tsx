@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabaseClient";
-
 
 const DEMO_STUDENT_ID = "77777777-7777-7777-7777-777777777777";
 const DEMO_STUDENT_NAME = "学生 A";
@@ -35,28 +33,17 @@ type LessonRecord = {
   created_at: string;
 };
 
+type StudentLessonComment = {
+  id: string;
+  lesson_record_id: string;
+  student_name: string | null;
+  comment: string;
+  created_at: string;
+};
+
 export const dynamic = "force-dynamic";
 
 export default async function StudentPage() {
-  async function submitComment(formData: FormData) {
-    "use server";
-
-    const lessonRecordId = String(formData.get("lesson_record_id") || "");
-    const comment = String(formData.get("comment") || "").trim();
-
-    if (!lessonRecordId || !comment) return;
-
-    await supabase.from("student_lesson_comments").insert({
-      lesson_record_id: lessonRecordId,
-      student_id: DEMO_STUDENT_ID,
-      student_name: DEMO_STUDENT_NAME,
-      comment,
-    });
-
-    revalidatePath("/student");
-    revalidatePath("/student/lessons");
-  }
-
   const { data: goalsFromSupabase } = await supabase
     .from("teaching_goals")
     .select("id, title, description, expected_lessons, status")
@@ -78,6 +65,20 @@ export default async function StudentPage() {
 
   const records = (recordsFromSupabase || []) as LessonRecord[];
   const latestRecord = records[0];
+
+  const { data: latestRecordCommentsFromSupabase } = latestRecord
+    ? await supabase
+        .from("student_lesson_comments")
+        .select("id, lesson_record_id, student_name, comment, created_at")
+        .eq("student_id", DEMO_STUDENT_ID)
+        .eq("lesson_record_id", latestRecord.id)
+        .order("created_at", { ascending: false })
+    : { data: [] };
+
+  const latestRecordComments =
+    (latestRecordCommentsFromSupabase || []) as StudentLessonComment[];
+
+  const hasCommentForLatestRecord = latestRecordComments.length > 0;
 
   const completedLessonsForCurrentGoal = currentGoal
     ? records.filter((record) => record.goal_id === currentGoal.id).length
@@ -262,31 +263,32 @@ export default async function StudentPage() {
                 )}
               </div>
 
-              <form action={submitComment} className="mt-6">
-                <input
-                  type="hidden"
-                  name="lesson_record_id"
-                  value={latestRecord.id}
-                />
+              <div className="mt-6 rounded-2xl border border-emerald-100 bg-white p-4">
+                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-700">
+                      {hasCommentForLatestRecord
+                        ? "小老师收到你的留言了😁"
+                        : "想对小老师说一句话吗？"}
+                    </p>
 
-                <label className="text-sm font-semibold text-emerald-700">
-                  想对小老师说一句话吗？
-                </label>
+                    <p className="mt-2 text-sm leading-7 text-stone-600">
+                      {hasCommentForLatestRecord
+                        ? "你可以去课程记录里点击展开来查看或修改自己写过的留言。"
+                        : "你可以在课程记录里点击展开然后给这节课写一句留言。"}
+                    </p>
+                  </div>
+                </div>
 
-                <textarea
-                  name="comment"
-                  rows={4}
-                  placeholder="比如：我今天学会了…… / 我还有点没懂…… / 我想对老师说……"
-                  className="mt-2 w-full rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm leading-7 outline-none focus:border-emerald-500"
-                />
-
-                <button
-                  type="submit"
-                  className="mt-3 rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
+                <Link
+                  href="/student/lessons"
+                  className="mt-3 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
                 >
-                  提交留言
-                </button>
-              </form>
+                  {hasCommentForLatestRecord
+                    ? "查看我的留言"
+                    : "去课程记录里留言"}
+                </Link>
+              </div>
             </article>
           ) : (
             <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 leading-7 text-stone-600">

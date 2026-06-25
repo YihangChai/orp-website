@@ -221,7 +221,7 @@ export default async function StudentLessonsPage() {
                             <textarea
                               name="comment"
                               rows={3}
-                              placeholder="我想对小老师说……"
+                              placeholder="比如：我今天学会了…… / 我还有点没懂…… / 我想对老师说……"
                               className="w-full rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm leading-7 outline-none focus:border-emerald-500"
                             />
 
