@@ -50,8 +50,8 @@ type AdminActionRequest = {
 const TOTAL_ADMIN_COUNT = 4;
 
 const sampleText = `届别	班级名称	合作学校	小老师	学生名单	备注
-2026 暑期	秋叶班	河北某小学	Ethan	学生A、学生B、学生C	阅读基础较弱，适合从故事类内容开始
-2026 暑期	蓝天班	河北某小学	Cindy	学生D、学生E、学生F	学生比较活跃，可以加入历史地理拓展`;
+24-25届	秋叶班	河北某小学	Ethan	学生A、学生B、学生C	阅读基础较弱，适合从故事类内容开始
+24-25届	蓝天班	河北某小学	Cindy	学生D、学生E、学生F	学生比较活跃，可以加入历史地理拓展`;
 
 function splitNames(text: string) {
   return text
@@ -263,7 +263,7 @@ async function getOrCreateStudent(studentName: string, note?: string) {
 }
 
 export default function AdminClassesPage() {
-  const [importText, setImportText] = useState(sampleText);
+  const [importText, setImportText] = useState("");
   const [hasParsed, setHasParsed] = useState(false);
 
   const [classes, setClasses] = useState<ClassTableItem[]>([]);
@@ -1131,7 +1131,7 @@ export default function AdminClassesPage() {
                 onClick={handleParse}
                 className="rounded-full bg-[#2f5d50] px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
               >
-                解析预览
+                预览
               </button>
 
               <button
@@ -1140,7 +1140,7 @@ export default function AdminClassesPage() {
                 disabled={isImporting || importText.trim().length === 0}
                 className="rounded-full border border-emerald-700 px-6 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isImporting ? "正在导入..." : "确认导入数据库"}
+                {isImporting ? "正在导入..." : "确认导入班级"}
               </button>
             </div>
 
