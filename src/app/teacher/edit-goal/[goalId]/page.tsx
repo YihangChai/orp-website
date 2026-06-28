@@ -127,7 +127,7 @@ export default function EditGoalPage() {
     setMessage("修改成功，正在返回全部目标与授课记录...");
     setIsSubmitting(false);
 
-    router.push("/teacher/goals");
+    router.push("/teacher");
     router.refresh();
   }
 
@@ -136,10 +136,10 @@ export default function EditGoalPage() {
       <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
         <section className="mx-auto max-w-3xl">
           <Link
-            href="/teacher/goals"
+            href="/teacher"
             className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
           >
-            ← 返回全部目标与授课记录
+            ← 返回首页
           </Link>
 
           <p className="mt-8 text-stone-600">正在读取目标...</p>
@@ -153,10 +153,10 @@ export default function EditGoalPage() {
       <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
         <section className="mx-auto max-w-3xl">
           <Link
-            href="/teacher/goals"
+            href="/teacher"
             className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
           >
-            ← 返回全部目标与授课记录
+            ← 返回首页
           </Link>
 
           <div className="mt-8 rounded-3xl bg-white p-8 shadow-sm">
@@ -175,10 +175,10 @@ export default function EditGoalPage() {
     <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
       <section className="mx-auto max-w-3xl">
         <Link
-          href="/teacher/goals"
+          href="/teacher"
           className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
         >
-          ← 返回全部目标与授课记录
+          ← 返回首页
         </Link>
 
         <div className="mt-8 rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
