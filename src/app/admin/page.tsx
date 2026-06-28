@@ -325,7 +325,7 @@ export default function AdminPage() {
       if (possibleErrors.length > 0) {
         console.error(possibleErrors);
         setMessage(
-          "部分数据读取失败。页面仍会显示已经成功读取的数据，请检查 Supabase 表权限或字段是否完整。"
+          "部分数据读取失败。页面仍会显示已经成功读取的数据，请检查数据库表单权限或字段是否完整。"
         );
       }
 
@@ -492,15 +492,9 @@ export default function AdminPage() {
           <section className="rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-7">
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
               <div>
-                <p className="text-sm font-semibold text-[#2f5d50]">Admin</p>
-
                 <h2 className="mt-2 text-3xl font-bold text-emerald-950">
                   ORP 运营总览
                 </h2>
-
-                <p className="mt-3 max-w-2xl text-sm leading-7 text-stone-600">
-                  首页展示整体概况、全站搜索和高风险待确认操作。具体管理仍放在对应模块里处理，避免首页被大量记录淹没。
-                </p>
               </div>
 
               <button
@@ -545,7 +539,7 @@ export default function AdminPage() {
                 </h2>
 
                 <p className="mt-2 text-sm leading-7 text-stone-600">
-                  搜索班级、学生、小老师、课程记录或留言。默认不展开数据，输入关键词后再显示结果。
+                  搜索班级、学生、小老师、课程记录或留言
                 </p>
               </div>
 
@@ -586,12 +580,6 @@ export default function AdminPage() {
               )}
             </div>
 
-            {!hasSearchTerm && (
-              <div className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-                输入关键词后，这里会显示 Supabase 中匹配的真实数据。为了避免首页过载，系统不会默认展开所有班级和记录。
-              </div>
-            )}
-
             {hasSearchTerm && (
               <div className="mt-5">
                 <p className="text-sm font-semibold text-stone-600">
@@ -600,7 +588,7 @@ export default function AdminPage() {
 
                 {filteredItems.length === 0 ? (
                   <div className="mt-3 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-                    没有找到相关内容。可以换一个关键词，比如班级名、学生名、小老师名或课程主题。
+                    没有找到相关内容
                   </div>
                 ) : (
                   <div className="mt-3 space-y-3">

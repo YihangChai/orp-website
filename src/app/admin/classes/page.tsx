@@ -48,16 +48,19 @@ type AdminActionRequest = {
 };
 
 const TOTAL_ADMIN_COUNT = 4;
+const DELETE_CLASS_REQUIRED_APPROVALS = 2;
 
 const sampleText = `届别	班级名称	合作学校	小老师	学生名单	备注
 24-25届	秋叶班	河北某小学	Ethan	学生A、学生B、学生C	阅读基础较弱，适合从故事类内容开始
 24-25届	蓝天班	河北某小学	Cindy	学生D、学生E、学生F	学生比较活跃，可以加入历史地理拓展`;
 
 function splitNames(text: string) {
-  return text
+  const names = text
     .split(/、|,|，|;|；|\//)
     .map((name) => name.trim())
     .filter(Boolean);
+
+  return Array.from(new Set(names));
 }
 
 function parseImportText(text: string) {
@@ -90,21 +93,10 @@ function parseImportText(text: string) {
 
     const [cohort, className, school, teacherName, studentText, note] = columns;
 
-    if (!cohort) {
-      errors.push({ lineNumber, message: "缺少届别 / 学期。" });
-    }
-
-    if (!className) {
-      errors.push({ lineNumber, message: "缺少班级名称。" });
-    }
-
-    if (!teacherName) {
-      errors.push({ lineNumber, message: "缺少小老师姓名。" });
-    }
-
-    if (!studentText) {
-      errors.push({ lineNumber, message: "缺少学生名单。" });
-    }
+    if (!cohort) errors.push({ lineNumber, message: "缺少届别 / 学期。" });
+    if (!className) errors.push({ lineNumber, message: "缺少班级名称。" });
+    if (!teacherName) errors.push({ lineNumber, message: "缺少小老师姓名。" });
+    if (!studentText) errors.push({ lineNumber, message: "缺少学生名单。" });
 
     const studentNames = splitNames(studentText || "");
 
@@ -273,6 +265,7 @@ export default function AdminClassesPage() {
   const [message, setMessage] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [showImportPanel, setShowImportPanel] = useState(true);
+  const [isClassListOpen, setIsClassListOpen] = useState(true);
 
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [editClassName, setEditClassName] = useState("");
@@ -284,12 +277,10 @@ export default function AdminClassesPage() {
   const [selectedArchiveCohortId, setSelectedArchiveCohortId] = useState("");
   const [isArchivingCohort, setIsArchivingCohort] = useState(false);
   const [selectedClassView, setSelectedClassView] = useState("active");
+  const [currentAdminName, setCurrentAdminName] = useState("");
 
   const { rows, errors } = useMemo(() => {
-    if (!hasParsed) {
-      return { rows: [], errors: [] };
-    }
-
+    if (!hasParsed) return { rows: [], errors: [] };
     return parseImportText(importText);
   }, [hasParsed, importText]);
 
@@ -314,8 +305,12 @@ export default function AdminClassesPage() {
 
   const filteredClasses = classes.filter((classItem) => {
     if (selectedClassView === "active") {
-        return(classItem.status === "active" || classItem.status === "delete_requested");
+      return (
+        classItem.status === "active" ||
+        classItem.status === "delete_requested"
+      );
     }
+
     return classItem.cohortId === selectedClassView;
   });
 
@@ -431,6 +426,64 @@ export default function AdminClassesPage() {
     await fetchClasses();
   }
 
+  async function registerApproval(request: AdminActionRequest) {
+    const trimmedAdminName = currentAdminName.trim();
+
+    if (!trimmedAdminName) {
+      setMessage("请先在高风险操作区填写当前管理员姓名。");
+      return null;
+    }
+
+    const { error: approvalError } = await supabase
+      .from("admin_action_approvals")
+      .insert({
+        request_id: request.id,
+        admin_name: trimmedAdminName,
+      });
+
+    if (approvalError) {
+      if (
+        approvalError.message.includes("duplicate") ||
+        approvalError.message.includes("unique")
+      ) {
+        setMessage(
+          `管理员「${trimmedAdminName}」已经确认过这项申请，不能重复确认。`
+        );
+      } else {
+        setMessage(`记录确认失败：${approvalError.message}`);
+      }
+
+      return null;
+    }
+
+    const { count, error: countError } = await supabase
+      .from("admin_action_approvals")
+      .select("id", { count: "exact", head: true })
+      .eq("request_id", request.id);
+
+    if (countError) {
+      setMessage(`统计确认次数失败：${countError.message}`);
+      return null;
+    }
+
+    const approvalCount = count || 0;
+
+    const { error: updateError } = await supabase
+      .from("admin_action_requests")
+      .update({
+        approvals_count: approvalCount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", request.id);
+
+    if (updateError) {
+      setMessage(`更新确认次数失败：${updateError.message}`);
+      return null;
+    }
+
+    return approvalCount;
+  }
+
   useEffect(() => {
     refreshData();
   }, []);
@@ -513,18 +566,40 @@ export default function AdminClassesPage() {
         const teacher = await getOrCreateTeacher(row.teacherName);
         importedTeacherCount += 1;
 
-        await supabase.from("class_teachers").insert({
-          class_id: classItem.id,
-          teacher_id: teacher.id,
-        });
+        const { error: teacherRelationError } = await supabase
+          .from("class_teachers")
+          .upsert(
+            {
+              class_id: classItem.id,
+              teacher_id: teacher.id,
+            },
+            {
+              onConflict: "class_id,teacher_id",
+            }
+          );
+
+        if (teacherRelationError) {
+          throw new Error(teacherRelationError.message);
+        }
 
         for (const studentName of row.studentNames) {
           const student = await getOrCreateStudent(studentName, row.note);
 
-          await supabase.from("class_students").insert({
-            class_id: classItem.id,
-            student_id: student.id,
-          });
+          const { error: studentRelationError } = await supabase
+            .from("class_students")
+            .upsert(
+              {
+                class_id: classItem.id,
+                student_id: student.id,
+              },
+              {
+                onConflict: "class_id,student_id",
+              }
+            );
+
+          if (studentRelationError) {
+            throw new Error(studentRelationError.message);
+          }
 
           importedStudentCount += 1;
         }
@@ -619,10 +694,15 @@ export default function AdminClassesPage() {
 
         const { error: teacherRelationError } = await supabase
           .from("class_teachers")
-          .insert({
-            class_id: classId,
-            teacher_id: teacher.id,
-          });
+          .upsert(
+            {
+              class_id: classId,
+              teacher_id: teacher.id,
+            },
+            {
+              onConflict: "class_id,teacher_id",
+            }
+          );
 
         if (teacherRelationError) {
           throw new Error(teacherRelationError.message);
@@ -641,10 +721,15 @@ export default function AdminClassesPage() {
 
         const { error: studentRelationError } = await supabase
           .from("class_students")
-          .insert({
-            class_id: classId,
-            student_id: student.id,
-          });
+          .upsert(
+            {
+              class_id: classId,
+              student_id: student.id,
+            },
+            {
+              onConflict: "class_id,student_id",
+            }
+          );
 
         if (studentRelationError) {
           throw new Error(studentRelationError.message);
@@ -681,7 +766,7 @@ export default function AdminClassesPage() {
         target_name: className,
         status: "pending",
         approvals_count: 0,
-        required_approvals: 2,
+        required_approvals: DELETE_CLASS_REQUIRED_APPROVALS,
         requested_by: "当前管理员",
         note: "申请删除错建班级",
       });
@@ -717,10 +802,22 @@ export default function AdminClassesPage() {
     const request = getClassDeleteRequest(classId);
 
     if (request) {
+      const { error: approvalError } = await supabase
+        .from("admin_action_approvals")
+        .delete()
+        .eq("request_id", request.id);
+
+      if (approvalError) {
+        setMessage(`清除确认记录失败：${approvalError.message}`);
+        return;
+      }
+
       const { error: requestError } = await supabase
         .from("admin_action_requests")
         .update({
           status: "canceled",
+          approvals_count: 0,
+          note: "删除申请已撤回。",
         })
         .eq("id", request.id);
 
@@ -754,30 +851,20 @@ export default function AdminClassesPage() {
       return;
     }
 
-    const nextApprovalCount = request.approvals_count + 1;
-
     const confirmed = window.confirm(
-      `确认批准删除申请吗？\n\n班级：${classItem.name}\n当前确认数：${request.approvals_count}/${request.required_approvals}\n确认后：${nextApprovalCount}/${request.required_approvals}`
+      `确认批准删除申请吗？\n\n班级：${classItem.name}\n当前确认数：${request.approvals_count}/${request.required_approvals}`
     );
 
     if (!confirmed) return;
 
-    if (nextApprovalCount < request.required_approvals) {
-      const { error } = await supabase
-        .from("admin_action_requests")
-        .update({
-          approvals_count: nextApprovalCount,
-        })
-        .eq("id", request.id);
+    const approvalCount = await registerApproval(request);
 
-      if (error) {
-        setMessage(`确认失败：${error.message}`);
-        return;
-      }
+    if (approvalCount === null) return;
 
+    if (approvalCount < request.required_approvals) {
       setMessage(
         `已记录一次确认。删除申请还需要 ${
-          request.required_approvals - nextApprovalCount
+          request.required_approvals - approvalCount
         } 次确认。`
       );
 
@@ -813,7 +900,7 @@ export default function AdminClassesPage() {
       await supabase
         .from("admin_action_requests")
         .update({
-          approvals_count: nextApprovalCount,
+          approvals_count: approvalCount,
           status: "completed",
           note: "班级已有课程记录，系统未真删除，已改为封存。",
         })
@@ -843,7 +930,7 @@ export default function AdminClassesPage() {
     await supabase
       .from("admin_action_requests")
       .update({
-        approvals_count: nextApprovalCount,
+        approvals_count: approvalCount,
         status: "completed",
       })
       .eq("id", request.id);
@@ -863,7 +950,7 @@ export default function AdminClassesPage() {
     }
 
     const typedName = window.prompt(
-      `你正在发起封存整个届别：${cohort.name}\n\n这应该只在学年或项目周期结束后操作。\n封存需要所有管理员确认，目前系统设定为 ${TOTAL_ADMIN_COUNT} 位管理员。\n\n请输入届别名称以确认：`
+      `你正在发起封存整个届别：${cohort.name}\n\n这应该只在学年或项目周期结束后操作。\n封存需要所有管理员确认，目前系统设定为 ${TOTAL_ADMIN_COUNT} 位管理员。\n\n封存完成后：该届班级会封存；只属于该届的老师和学生也会同步归档。\n\n请输入届别名称以确认：`
     );
 
     if (typedName !== cohort.name) {
@@ -901,7 +988,7 @@ export default function AdminClassesPage() {
           approvals_count: 0,
           required_approvals: TOTAL_ADMIN_COUNT,
           requested_by: "当前管理员",
-          note: "学年结束，申请封存整届班级。",
+          note: "学年结束，申请封存整届班级，并同步归档只属于该届的老师和学生。",
         });
 
       if (requestError) throw new Error(requestError.message);
@@ -923,36 +1010,70 @@ export default function AdminClassesPage() {
   }
 
   async function approveArchiveCohort(request: AdminActionRequest) {
-    const nextApprovalCount = request.approvals_count + 1;
-
     const confirmed = window.confirm(
-      `确认批准封存整届吗？\n\n届别：${request.target_name}\n当前确认数：${request.approvals_count}/${request.required_approvals}\n确认后：${nextApprovalCount}/${request.required_approvals}`
+      `确认批准封存整届吗？\n\n届别：${request.target_name}\n当前确认数：${request.approvals_count}/${request.required_approvals}\n\n同一管理员不能重复确认。`
     );
 
     if (!confirmed) return;
 
-    if (nextApprovalCount < request.required_approvals) {
-      const { error } = await supabase
-        .from("admin_action_requests")
-        .update({
-          approvals_count: nextApprovalCount,
-        })
-        .eq("id", request.id);
+    const approvalCount = await registerApproval(request);
 
-      if (error) {
-        setMessage(`确认失败：${error.message}`);
-        return;
-      }
+    if (approvalCount === null) return;
 
+    if (approvalCount < request.required_approvals) {
       setMessage(
         `已记录一次确认。封存整届还需要 ${
-          request.required_approvals - nextApprovalCount
+          request.required_approvals - approvalCount
         } 次确认。`
       );
 
       await refreshData();
       return;
     }
+
+    const { data: cohortClasses, error: cohortClassesError } = await supabase
+      .from("classes")
+      .select("id")
+      .eq("cohort_id", request.target_id);
+
+    if (cohortClassesError) {
+      setMessage(`读取该届班级失败：${cohortClassesError.message}`);
+      return;
+    }
+
+    const cohortClassIds = (cohortClasses || []).map(
+      (classItem) => classItem.id
+    );
+
+    const { data: teacherRelations, error: teacherRelationError } =
+      await supabase
+        .from("class_teachers")
+        .select("teacher_id, class_id")
+        .in("class_id", cohortClassIds.length > 0 ? cohortClassIds : [""]);
+
+    if (teacherRelationError) {
+      setMessage(`读取该届小老师失败：${teacherRelationError.message}`);
+      return;
+    }
+
+    const { data: studentRelations, error: studentRelationError } =
+      await supabase
+        .from("class_students")
+        .select("student_id, class_id")
+        .in("class_id", cohortClassIds.length > 0 ? cohortClassIds : [""]);
+
+    if (studentRelationError) {
+      setMessage(`读取该届学生失败：${studentRelationError.message}`);
+      return;
+    }
+
+    const relatedTeacherIds = Array.from(
+      new Set((teacherRelations || []).map((relation) => relation.teacher_id))
+    );
+
+    const relatedStudentIds = Array.from(
+      new Set((studentRelations || []).map((relation) => relation.student_id))
+    );
 
     const { error: classError } = await supabase
       .from("classes")
@@ -978,11 +1099,98 @@ export default function AdminClassesPage() {
       return;
     }
 
+    const { data: activeClassesAfterArchive, error: activeClassesError } =
+      await supabase.from("classes").select("id").eq("status", "active");
+
+    if (activeClassesError) {
+      setMessage(`检查运行中班级失败：${activeClassesError.message}`);
+      return;
+    }
+
+    const activeClassIds = new Set(
+      (activeClassesAfterArchive || []).map((classItem) => classItem.id)
+    );
+
+    if (relatedTeacherIds.length > 0) {
+      const { data: allTeacherRelations, error: allTeacherRelationError } =
+        await supabase
+          .from("class_teachers")
+          .select("teacher_id, class_id")
+          .in("teacher_id", relatedTeacherIds);
+
+      if (allTeacherRelationError) {
+        setMessage(
+          `检查小老师是否仍有运行中班级失败：${allTeacherRelationError.message}`
+        );
+        return;
+      }
+
+      const teachersStillActive = new Set(
+        (allTeacherRelations || [])
+          .filter((relation) => activeClassIds.has(relation.class_id))
+          .map((relation) => relation.teacher_id)
+      );
+
+      const teachersToArchive = relatedTeacherIds.filter(
+        (teacherId) => !teachersStillActive.has(teacherId)
+      );
+
+      if (teachersToArchive.length > 0) {
+        const { error: teacherArchiveError } = await supabase
+          .from("teachers")
+          .update({ status: "archived" })
+          .in("id", teachersToArchive);
+
+        if (teacherArchiveError) {
+          setMessage(`同步归档小老师失败：${teacherArchiveError.message}`);
+          return;
+        }
+      }
+    }
+
+    if (relatedStudentIds.length > 0) {
+      const { data: allStudentRelations, error: allStudentRelationError } =
+        await supabase
+          .from("class_students")
+          .select("student_id, class_id")
+          .in("student_id", relatedStudentIds);
+
+      if (allStudentRelationError) {
+        setMessage(
+          `检查学生是否仍有运行中班级失败：${allStudentRelationError.message}`
+        );
+        return;
+      }
+
+      const studentsStillActive = new Set(
+        (allStudentRelations || [])
+          .filter((relation) => activeClassIds.has(relation.class_id))
+          .map((relation) => relation.student_id)
+      );
+
+      const studentsToArchive = relatedStudentIds.filter(
+        (studentId) => !studentsStillActive.has(studentId)
+      );
+
+      if (studentsToArchive.length > 0) {
+        const { error: studentArchiveError } = await supabase
+          .from("students")
+          .update({ status: "archived" })
+          .in("id", studentsToArchive);
+
+        if (studentArchiveError) {
+          setMessage(`同步归档学生失败：${studentArchiveError.message}`);
+          return;
+        }
+      }
+    }
+
     const { error: requestError } = await supabase
       .from("admin_action_requests")
       .update({
-        approvals_count: nextApprovalCount,
+        approvals_count: approvalCount,
         status: "completed",
+        note: "整届已封存；只属于该届的老师和学生已同步归档。",
       })
       .eq("id", request.id);
 
@@ -992,7 +1200,7 @@ export default function AdminClassesPage() {
     }
 
     setMessage(
-      `${request.target_name} 已正式封存。该届班级已从默认运行中列表移出，你仍然可以通过届别筛选查看历史班级。`
+      `${request.target_name} 已正式封存。该届班级已封存；只属于这一届的老师和学生也已同步归档。`
     );
     setSelectedClassView("active");
     await refreshData();
@@ -1000,22 +1208,33 @@ export default function AdminClassesPage() {
 
   async function cancelArchiveCohortRequest(request: AdminActionRequest) {
     const confirmed = window.confirm(
-        `确认取消封存申请吗？\n\n届别：${request.target_name}\n\n取消后，这一届不会被封存，所有班级状态保持不变。`
+      `确认取消封存申请吗？\n\n届别：${request.target_name}\n\n取消后，这一届不会被封存，所有班级状态保持不变。`
     );
 
     if (!confirmed) return;
 
+    const { error: approvalError } = await supabase
+      .from("admin_action_approvals")
+      .delete()
+      .eq("request_id", request.id);
+
+    if (approvalError) {
+      setMessage(`清除确认记录失败：${approvalError.message}`);
+      return;
+    }
+
     const { error } = await supabase
-        .from("admin_action_requests")
-        .update({
+      .from("admin_action_requests")
+      .update({
         status: "canceled",
+        approvals_count: 0,
         note: "封存申请已取消。",
-        })
-        .eq("id", request.id);
+      })
+      .eq("id", request.id);
 
     if (error) {
-        setMessage(`取消封存申请失败：${error.message}`);
-        return;
+      setMessage(`取消封存申请失败：${error.message}`);
+      return;
     }
 
     setMessage(`${request.target_name} 的封存申请已取消。`);
@@ -1037,26 +1256,28 @@ export default function AdminClassesPage() {
               班级与分班管理
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里用于批量导入分班结果、修改班级信息、处理删除申请和封存旧届别。高风险操作不会立即删除历史数据。
+              这里用于批量导入分班结果、修改班级信息、处理删除申请和封存旧届别。整届封存会同步归档只属于该届的老师和学生。
             </p>
           </div>
 
-          {showImportPanel ? (
-            <button
-              type="button"
-              onClick={() => setShowImportPanel(false)}
-              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-            >
-              返回班级管理
-            </button>
-          ) : (
-            <Link
-              href="/admin"
-              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-            >
-              返回管理员主页
-            </Link>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {showImportPanel ? (
+              <button
+                type="button"
+                onClick={() => setShowImportPanel(false)}
+                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+              >
+                返回班级管理
+              </button>
+            ) : (
+              <Link
+                href="/admin"
+                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+              >
+                返回管理员主页
+              </Link>
+            )}
+          </div>
         </div>
 
         {message && (
@@ -1220,50 +1441,66 @@ export default function AdminClassesPage() {
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
             <div>
-                <h2 className="text-xl font-bold text-emerald-950">
-                    已导入班级
-                </h2>
+              <h2 className="text-xl font-bold text-emerald-950">
+                已导入班级
+              </h2>
 
-                <p className="mt-2 text-sm leading-7 text-stone-600">
-                    默认只显示运行中的班级。已封存的历史届别不会出现在默认列表里，但可以通过筛选查看。
-                </p>
+              <p className="mt-2 text-sm leading-7 text-stone-600">
+                默认只显示运行中的班级。已封存的历史届别不会出现在默认列表里，但可以通过筛选查看。
+              </p>
             </div>
 
             <div className="flex flex-col gap-3 md:items-end">
+              <div className="flex flex-col gap-2 md:flex-row">
                 <select
-                value={selectedClassView}
-                onChange={(event) => setSelectedClassView(event.target.value)}
-                className="w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-2.5 text-sm outline-none focus:border-emerald-500 md:w-64"
+                  value={selectedClassView}
+                  onChange={(event) => setSelectedClassView(event.target.value)}
+                  className="w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-2.5 text-sm outline-none focus:border-emerald-500 md:w-64"
                 >
+                  <option value="active">当前运行中 / 待处理班级</option>
 
-                {cohorts.map((cohort) => (
+                  {cohorts.map((cohort) => (
                     <option key={cohort.id} value={cohort.id}>
-                    {cohort.name} - {cohort.status === "active" ? "运行中" : "已封存"}
+                      {cohort.name} -{" "}
+                      {cohort.status === "active" ? "运行中" : "已封存"}
                     </option>
-                ))}
+                  ))}
                 </select>
 
-                <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsClassListOpen((prev) => !prev)}
+                  className="rounded-2xl border border-emerald-700 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                >
+                  {isClassListOpen ? "收起列表" : "展开列表"}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2">
                 <span className="w-fit rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
-                    运行中 {activeClasses.length}
+                  运行中 {activeClasses.length}
                 </span>
 
                 <span className="w-fit rounded-full bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-600">
-                    已封存 {archivedClasses.length}
+                  已封存 {archivedClasses.length}
                 </span>
 
                 <span className="w-fit rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700">
-                    删除申请 {deleteRequestedClasses.length}
+                  删除申请 {deleteRequestedClasses.length}
                 </span>
 
                 <span className="w-fit rounded-full bg-[#fffdf4] px-3 py-1.5 text-xs font-semibold text-stone-600">
-                    当前显示 {filteredClasses.length}
+                  当前显示 {filteredClasses.length}
                 </span>
-                </div>
+              </div>
             </div>
-            </div>
+          </div>
 
-          {filteredClasses.length === 0 ? (
+          {!isClassListOpen ? (
+            <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
+              班级列表已收起。当前筛选条件下共有 {filteredClasses.length} 个班级。
+            </p>
+          ) : filteredClasses.length === 0 ? (
             <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
               当前筛选条件下没有班级。你可以切换届别筛选，或者使用补充导入添加新班级。
             </p>
@@ -1478,14 +1715,16 @@ export default function AdminClassesPage() {
                                   查看详情
                                 </Link>
 
-                                {classItem.status !== "archived" &&(
-                                    <button
-                                        type="button"
-                                        onClick={()=> startEditingClass(classItem)}
-                                        className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                                    >
-                                        编辑
-                                    </button>
+                                {classItem.status !== "archived" && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      startEditingClass(classItem)
+                                    }
+                                    className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                                  >
+                                    编辑
+                                  </button>
                                 )}
 
                                 {!deleteRequest &&
@@ -1517,14 +1756,32 @@ export default function AdminClassesPage() {
         </section>
 
         {!showImportPanel && (
-          <section className="mt-8 rounded-[1.75rem] border border-red-100 bg-white p-5 shadow-sm md:p-6">
+          <section
+            id="danger-zone"
+            className="mt-8 rounded-[1.75rem] border border-red-100 bg-white p-5 shadow-sm md:p-6"
+          >
             <h2 className="text-xl font-bold text-red-800">
               学年结束与整届封存
             </h2>
 
             <p className="mt-2 text-sm leading-7 text-stone-600">
-              这个区域只在一届课程真正结束后使用。封存会把这一届所有班级改为已封存，但不会删除课程记录。封存需要所有管理员确认，目前系统临时设定为 {TOTAL_ADMIN_COUNT} 位管理员。
+              这个区域只在一届课程真正结束后使用。封存会把这一届所有班级改为已封存，并同步归档只属于这一届的老师和学生。封存需要所有管理员确认，目前系统临时设定为 {TOTAL_ADMIN_COUNT} 位管理员。
             </p>
+
+            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
+              <p className="font-semibold text-red-800">当前确认管理员</p>
+
+              <p className="mt-2 text-sm leading-7 text-stone-600">
+                现在还没有正式登录系统，所以先用管理员姓名模拟。之后接入 Auth 后，会自动使用当前登录管理员账号。
+              </p>
+
+              <input
+                value={currentAdminName}
+                onChange={(event) => setCurrentAdminName(event.target.value)}
+                placeholder="填写当前管理员姓名，例如 Ethan"
+                className="mt-3 w-full rounded-2xl border border-red-100 bg-white px-4 py-3 text-sm outline-none focus:border-red-300 md:max-w-sm"
+              />
+            </div>
 
             <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center">
               <select
@@ -1573,22 +1830,22 @@ export default function AdminClassesPage() {
                     </p>
 
                     <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                            type="button"
-                            onClick={()=>approveArchiveCohort(request)}
-                            className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
-                        >
-                            确认封存
-                        </button>
+                      <button
+                        type="button"
+                        onClick={() => approveArchiveCohort(request)}
+                        className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                      >
+                        确认封存
+                      </button>
 
-                        <button
-                            type="button"
-                            onClick={()=>cancelArchiveCohortRequest(request)}
-                            className="rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
-                        >
-                            取消申请
-                        </button>
-                    </div>    
+                      <button
+                        type="button"
+                        onClick={() => cancelArchiveCohortRequest(request)}
+                        className="rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                      >
+                        取消申请
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
