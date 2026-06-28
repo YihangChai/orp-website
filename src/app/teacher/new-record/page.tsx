@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-const DEMO_TEACHER_ID = "11111111-1111-1111-1111-111111111111";
+const DEMO_TEACHER_ID = "6cd37c11-61dc-4150-bb24-911ba3a6eebd";
 
 type TeachingGoal = {
   id: string;
@@ -11,8 +11,15 @@ type TeachingGoal = {
   expected_lessons: number | null;
 };
 
+type ClassStudentItem = {
+  id: string;
+  name: string;
+  note: string | null;
+  status: string;
+};
+
 const classInfo = {
-  id: "22222222-2222-2222-2222-222222222222",
+  id: "887614b6-f449-4757-8b5b-7dfca9a16d7b",
   name: "秋叶班",
   teacher: "小老师姓名",
 };
@@ -45,10 +52,13 @@ export default function NewRecordPage() {
   const [isLoadingGoals, setIsLoadingGoals] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const [students, setStudents] = useState<ClassStudentItem[]>([]);
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     async function loadGoals() {
       setIsLoadingGoals(true);
+      fetchClassStudents();
 
       const { data, error } = await supabase
         .from("teaching_goals")
@@ -98,12 +108,9 @@ export default function NewRecordPage() {
       return;
     }
 
-    const lessonRecordId = crypto.randomUUID();
-
-    const { error: lessonError } = await supabase
+    const { data: insertedLesson, error: lessonError } = await supabase
       .from("lesson_records")
       .insert({
-        id: lessonRecordId,
         teacher_id: DEMO_TEACHER_ID,
         class_id: classInfo.id,
         goal_id: goalId || null,
@@ -115,7 +122,9 @@ export default function NewRecordPage() {
         next_plan: nextPlan || null,
         material_link: materialLink || null,
         teacher_reflection: teacherReflection || null,
-      });
+      })
+      .select("id")
+      .single();
 
     if (lessonError) {
       console.error(lessonError);
@@ -125,26 +134,64 @@ export default function NewRecordPage() {
     }
 
     const attendanceRows = students.map((student) => ({
-      lesson_record_id: lessonRecordId,
+      lesson_record_id: insertedLesson.id,
       student_id: student.id,
-      is_present: presentStudentIds.includes(student.id),
+      is_present: attendanceMap[student.id] ?? false,
     }));
 
-    const { error: attendanceError } = await supabase
-      .from("lesson_attendance")
-      .insert(attendanceRows);
 
-    if (attendanceError) {
-      console.error(attendanceError);
-      setMessage(`课程记录已保存，但出勤保存失败：${attendanceError.message}`);
-      setIsSubmitting(false);
-      return;
+    if (attendanceRows.length > 0) {
+      const { error: attendanceError } = await supabase
+        .from("lesson_attendance")
+        .insert(attendanceRows);
+      if (attendanceError) {
+        setMessage(`课程记录已提交，但学生出勤保存失败：${attendanceError.message}`);
+        return;
+      }
     }
-      setMessage("保存成功！正在返回小老师主页...");
+
+      setMessage("课程记录和学生出勤已提交。");
       setIsSubmitting(false);
       router.push("/teacher");
       router.refresh();
   }
+  async function fetchClassStudents() {
+    const { data, error } = await supabase
+      .from("class_students")
+      .select(
+        `
+        students (
+          id,
+          name,
+          note,
+          status
+        )
+      `
+      )
+      .eq("class_id", classInfo.id);
+
+    if (error) {
+      setMessage(`读取学生名单失败：${error.message}`);
+      return;
+    }
+
+    const formattedStudents =
+      data
+        ?.map((item: any) => item.students)
+        .filter(Boolean)
+        .filter((student: any) => student.status === "active") || [];
+
+    setStudents(formattedStudents);
+
+    const initialAttendance: Record<string, boolean> = {};
+
+    formattedStudents.forEach((student: ClassStudentItem) => {
+      initialAttendance[student.id] = true;
+    });
+
+    setAttendanceMap(initialAttendance);
+  }
+
 
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
@@ -261,38 +308,46 @@ export default function NewRecordPage() {
             </section>
 
             {/* 出勤 */}
-            <section className="border-t border-emerald-100 pt-7">
-              <h2 className="text-2xl font-bold text-emerald-950">
-                学生出勤
-              </h2>
+            <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-bold text-emerald-950">学生出勤</h2>
 
-              <p className="mt-3 leading-7 text-stone-600">
-                点击下方区域后，会显示本班所有学生。到了的学生打勾，未到的学生不勾选。
+              <p className="mt-2 text-sm leading-7 text-stone-600">
+                默认全部出勤。如果有学生没有参加本节课，请取消勾选。
               </p>
 
-              <details className="mt-5 rounded-2xl border border-emerald-100 bg-[#fffdf4] p-5">
-                <summary className="cursor-pointer select-none text-base font-semibold text-emerald-900">
-                  选择出勤学生｜{classInfo.name}
-                </summary>
-
-                <div className="mt-5 grid gap-3 md:grid-cols-2">
+              {students.length === 0 ? (
+                <p className="mt-4 rounded-2xl bg-[#fffdf4] p-4 text-sm text-stone-600">
+                  当前班级还没有录入学生，暂时无法记录出勤。
+                </p>
+              ) : (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   {students.map((student) => (
                     <label
                       key={student.id}
-                      className="flex cursor-pointer items-center gap-3 rounded-xl border border-emerald-100 bg-white px-4 py-3 text-stone-700 hover:bg-emerald-50"
+                      className="flex cursor-pointer items-center justify-between rounded-2xl bg-[#fffdf4] p-4 text-sm"
                     >
+                      <div>
+                        <p className="font-semibold text-emerald-950">{student.name}</p>
+                        <p className="mt-1 text-xs text-stone-500">
+                          {student.note || "暂无备注"}
+                        </p>
+                      </div>
+
                       <input
                         type="checkbox"
-                        name="attendance"
-                        value={student.id}
-                        className="h-4 w-4 accent-emerald-700"
+                        checked={attendanceMap[student.id] ?? false}
+                        onChange={(event) => {
+                          setAttendanceMap((prev) => ({
+                            ...prev,
+                            [student.id]: event.target.checked,
+                          }));
+                        }}
+                        className="h-4 w-4"
                       />
-
-                      <span className="font-medium">{student.name}</span>
                     </label>
                   ))}
                 </div>
-              </details>
+              )}
             </section>
 
             {/* 课程内容 */}

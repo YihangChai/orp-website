@@ -2,7 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabaseClient";
 
-const DEMO_TEACHER_ID = "11111111-1111-1111-1111-111111111111";
+const DEMO_TEACHER_ID = "6cd37c11-61dc-4150-bb24-911ba3a6eebd";
 
 type LessonRecord = {
   id: string;

@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-const DEMO_TEACHER_ID = "11111111-1111-1111-1111-111111111111";
+const DEMO_TEACHER_ID = "6cd37c11-61dc-4150-bb24-911ba3a6eebd";
 
 const classInfo = {
-  id: "22222222-2222-2222-2222-222222222222",
+  id: "887614b6-f449-4757-8b5b-7dfca9a16d7b",
   name: "秋叶班",
 };
 
