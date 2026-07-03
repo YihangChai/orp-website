@@ -261,9 +261,6 @@ export default async function TeacherDetailPage({
       <section className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
-            <p className="text-sm font-semibold text-[#2f5d50]">
-              Admin / 小老师详情
-            </p>
 
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               {teacher.name}
@@ -277,7 +274,7 @@ export default async function TeacherDetailPage({
           <div className="flex flex-wrap gap-2">
             <Link
               href="/admin/teachers"
-              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+              className="w-fit rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
             >
               返回小老师管理
             </Link>
