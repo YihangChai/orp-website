@@ -47,12 +47,24 @@ type AdminActionRequest = {
   note: string | null;
 };
 
-const TOTAL_ADMIN_COUNT = 4;
+type CreateClassRequestPayload = {
+  cohortName: string;
+  normalizedCohortName: string;
+  className: string;
+  normalizedClassName: string;
+  school: string;
+  teacherName: string;
+  studentNames: string[];
+  note: string;
+};
+
+const TOTAL_ADMIN_COUNT = 1;
 const DELETE_CLASS_REQUIRED_APPROVALS = 2;
+const CREATE_CLASS_REQUIRED_APPROVALS = TOTAL_ADMIN_COUNT;
 
 const sampleText = `届别	班级名称	合作学校	小老师	学生名单	备注
-24-25届	秋叶班	河北某小学	Ethan	学生A、学生B、学生C	阅读基础较弱，适合从故事类内容开始
-24-25届	蓝天班	河北某小学	Cindy	学生D、学生E、学生F	学生比较活跃，可以加入历史地理拓展`;
+2027暑期	秋叶班	河北某小学	Ethan	学生A、学生B、学生C	阅读基础较弱，适合从故事类内容开始
+2027暑期	蓝天班	河北某小学	Mario	学生D、学生E、学生F	学生比较活跃，可以加入历史地理拓展`;
 
 function splitNames(text: string) {
   const names = text
@@ -61,6 +73,20 @@ function splitNames(text: string) {
     .filter(Boolean);
 
   return Array.from(new Set(names));
+}
+
+function normalizeName(name: string) {
+  return name.trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function readCreateClassPayload(note: string | null) {
+  if (!note) return null;
+
+  try {
+    return JSON.parse(note) as CreateClassRequestPayload;
+  } catch {
+    return null;
+  }
 }
 
 function parseImportText(text: string) {
@@ -124,7 +150,7 @@ function parseImportText(text: string) {
   const seenClassKeys = new Set<string>();
 
   rows.forEach((row, index) => {
-    const key = `${row.cohort}-${row.className}`;
+    const key = `${normalizeName(row.cohort)}-${normalizeName(row.className)}`;
 
     if (seenClassKeys.has(key)) {
       errors.push({
@@ -153,18 +179,24 @@ function getStatusClassName(status: string) {
 }
 
 async function getOrCreateCohort(cohortName: string) {
-  const { data: existingCohort } = await supabase
+  const trimmedName = cohortName.trim();
+  const normalizedName = normalizeName(trimmedName);
+
+  const { data: existingCohort, error: existingError } = await supabase
     .from("cohorts")
     .select("id, name")
-    .eq("name", cohortName)
+    .eq("normalized_name", normalizedName)
     .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
 
   if (existingCohort) return existingCohort;
 
   const { data: newCohort, error } = await supabase
     .from("cohorts")
     .insert({
-      name: cohortName,
+      name: trimmedName,
+      normalized_name: normalizedName,
       status: "active",
     })
     .select("id, name")
@@ -180,12 +212,17 @@ async function getOrCreateClass(
   className: string,
   school: string
 ) {
-  const { data: existingClass } = await supabase
+  const trimmedClassName = className.trim();
+  const normalizedClassName = normalizeName(trimmedClassName);
+
+  const { data: existingClass, error: existingError } = await supabase
     .from("classes")
     .select("id, name")
     .eq("cohort_id", cohortId)
-    .eq("name", className)
+    .eq("normalized_name", normalizedClassName)
     .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
 
   if (existingClass) return existingClass;
 
@@ -193,7 +230,8 @@ async function getOrCreateClass(
     .from("classes")
     .insert({
       cohort_id: cohortId,
-      name: className,
+      name: trimmedClassName,
+      normalized_name: normalizedClassName,
       school: school || null,
       status: "active",
     })
@@ -278,6 +316,9 @@ export default function AdminClassesPage() {
   const [isArchivingCohort, setIsArchivingCohort] = useState(false);
   const [selectedClassView, setSelectedClassView] = useState("active");
   const [currentAdminName, setCurrentAdminName] = useState("");
+
+  const [isApprovingAllCreateRequests, setIsApprovingAllCreateRequests] =
+  useState(false);
 
   const { rows, errors } = useMemo(() => {
     if (!hasParsed) return { rows: [], errors: [] };
@@ -430,7 +471,7 @@ export default function AdminClassesPage() {
     const trimmedAdminName = currentAdminName.trim();
 
     if (!trimmedAdminName) {
-      setMessage("请先在高风险操作区填写当前管理员姓名。");
+      setMessage("请先填写当前管理员姓名。");
       return null;
     }
 
@@ -512,12 +553,12 @@ export default function AdminClassesPage() {
 
     if (parsed.errors.length > 0) {
       setHasParsed(true);
-      setMessage("导入失败：请先修正表格中的格式问题。");
+      setMessage("提交失败：请先修正表格中的格式问题。");
       return;
     }
 
     if (parsed.rows.length === 0) {
-      setMessage("导入失败：没有可以导入的班级。");
+      setMessage("提交失败：没有可以提交的班级。");
       return;
     }
 
@@ -527,7 +568,7 @@ export default function AdminClassesPage() {
     );
 
     const confirmed = window.confirm(
-      `确认导入 ${parsed.rows.length} 个班级、${parsedStudentCount} 名学生吗？`
+      `确认提交 ${parsed.rows.length} 个班级创建申请、${parsedStudentCount} 名学生信息吗？\n\n这一步不会直接创建班级，需要管理员确认后才会正式写入系统。`
     );
 
     if (!confirmed) return;
@@ -535,78 +576,108 @@ export default function AdminClassesPage() {
     setIsImporting(true);
 
     try {
-      let importedClassCount = 0;
-      let importedStudentCount = 0;
-      let importedTeacherCount = 0;
-      let skippedClassCount = 0;
+      let requestedClassCount = 0;
+      let skippedExistingClassCount = 0;
+      let skippedPendingRequestCount = 0;
+
+      const { data: pendingRequestsData, error: pendingRequestsError } =
+        await supabase
+          .from("admin_action_requests")
+          .select("id, note")
+          .eq("action_type", "create_class")
+          .eq("target_type", "class")
+          .eq("status", "pending");
+
+      if (pendingRequestsError) {
+        throw new Error(pendingRequestsError.message);
+      }
+
+      const pendingPayloads = (pendingRequestsData || [])
+        .map((request) => readCreateClassPayload(request.note))
+        .filter(Boolean) as CreateClassRequestPayload[];
 
       for (const row of parsed.rows) {
-        const cohort = await getOrCreateCohort(row.cohort);
+        const cohortName = row.cohort.trim();
+        const className = row.className.trim();
+        const normalizedCohortName = normalizeName(cohortName);
+        const normalizedClassName = normalizeName(className);
 
-        const { data: existingClass } = await supabase
-          .from("classes")
-          .select("id")
-          .eq("cohort_id", cohort.id)
-          .eq("name", row.className)
-          .maybeSingle();
+        const { data: existingCohort, error: existingCohortError } =
+          await supabase
+            .from("cohorts")
+            .select("id, name")
+            .eq("normalized_name", normalizedCohortName)
+            .maybeSingle();
 
-        if (existingClass) {
-          skippedClassCount += 1;
+        if (existingCohortError) {
+          throw new Error(existingCohortError.message);
+        }
+
+        if (existingCohort) {
+          const { data: existingClass, error: existingClassError } =
+            await supabase
+              .from("classes")
+              .select("id")
+              .eq("cohort_id", existingCohort.id)
+              .eq("normalized_name", normalizedClassName)
+              .maybeSingle();
+
+          if (existingClassError) {
+            throw new Error(existingClassError.message);
+          }
+
+          if (existingClass) {
+            skippedExistingClassCount += 1;
+            continue;
+          }
+        }
+
+        const hasPendingRequest = pendingPayloads.some((payload) => {
+          return (
+            payload.normalizedCohortName === normalizedCohortName &&
+            payload.normalizedClassName === normalizedClassName
+          );
+        });
+
+        if (hasPendingRequest) {
+          skippedPendingRequestCount += 1;
           continue;
         }
 
-        const classItem = await getOrCreateClass(
-          cohort.id,
-          row.className,
-          row.school
-        );
+        const payload: CreateClassRequestPayload = {
+          cohortName,
+          normalizedCohortName,
+          className,
+          normalizedClassName,
+          school: row.school.trim(),
+          teacherName: row.teacherName.trim(),
+          studentNames: row.studentNames,
+          note: row.note.trim(),
+        };
 
-        importedClassCount += 1;
+        const { error: requestError } = await supabase
+          .from("admin_action_requests")
+          .insert({
+            action_type: "create_class",
+            target_type: "class",
+            target_id: crypto.randomUUID(),
+            target_name: `${cohortName} / ${className}`,
+            status: "pending",
+            approvals_count: 0,
+            required_approvals: CREATE_CLASS_REQUIRED_APPROVALS,
+            requested_by: currentAdminName.trim() || "当前管理员",
+            note: JSON.stringify(payload),
+          });
 
-        const teacher = await getOrCreateTeacher(row.teacherName);
-        importedTeacherCount += 1;
-
-        const { error: teacherRelationError } = await supabase
-          .from("class_teachers")
-          .upsert(
-            {
-              class_id: classItem.id,
-              teacher_id: teacher.id,
-            },
-            {
-              onConflict: "class_id,teacher_id",
-            }
-          );
-
-        if (teacherRelationError) {
-          throw new Error(teacherRelationError.message);
+        if (requestError) {
+          throw new Error(requestError.message);
         }
 
-        for (const studentName of row.studentNames) {
-          const student = await getOrCreateStudent(studentName, row.note);
-
-          const { error: studentRelationError } = await supabase
-            .from("class_students")
-            .upsert(
-              {
-                class_id: classItem.id,
-                student_id: student.id,
-              },
-              {
-                onConflict: "class_id,student_id",
-              }
-            );
-
-          if (studentRelationError) {
-            throw new Error(studentRelationError.message);
-          }
-
-          importedStudentCount += 1;
-        }
+        requestedClassCount += 1;
       }
 
       setMessage(
-        `导入完成：新增 ${importedClassCount} 个班级、${importedStudentCount} 名学生。处理 ${importedTeacherCount} 位小老师，跳过 ${skippedClassCount} 个已存在班级。`
+        `已提交 ${requestedClassCount} 个班级创建申请。跳过 ${skippedExistingClassCount} 个已存在班级，跳过 ${skippedPendingRequestCount} 个已有待确认申请。`
       );
 
       setHasParsed(false);
@@ -615,12 +686,292 @@ export default function AdminClassesPage() {
     } catch (error) {
       setMessage(
         error instanceof Error
-          ? `导入失败：${error.message}`
-          : "导入失败：未知错误。"
+          ? `提交失败：${error.message}`
+          : "提交失败：未知错误。"
       );
     } finally {
       setIsImporting(false);
     }
+  }
+
+  async function executeCreateClassRequest(
+    request: AdminActionRequest,
+    approvalCount: number
+  ) {
+    const payload = readCreateClassPayload(request.note);
+
+    if (!payload) {
+      setMessage("创建班级申请内容无法解析。");
+      return;
+    }
+
+    try {
+      const cohort = await getOrCreateCohort(payload.cohortName);
+
+      const { data: existingClass, error: existingClassError } = await supabase
+        .from("classes")
+        .select("id")
+        .eq("cohort_id", cohort.id)
+        .eq("normalized_name", payload.normalizedClassName)
+        .maybeSingle();
+
+      if (existingClassError) {
+        throw new Error(existingClassError.message);
+      }
+
+      if (existingClass) {
+        await supabase
+          .from("admin_action_requests")
+          .update({
+            approvals_count: approvalCount,
+            status: "completed",
+            note: `${request.note}\n\n系统执行结果：该班级已经存在，因此没有重复创建。`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", request.id);
+
+        setMessage("这个班级已经存在，系统没有重复创建。申请已标记为完成。");
+        await refreshData();
+        return;
+      }
+
+      const classItem = await getOrCreateClass(
+        cohort.id,
+        payload.className,
+        payload.school
+      );
+
+      const teacher = await getOrCreateTeacher(payload.teacherName);
+
+      const { error: teacherRelationError } = await supabase
+        .from("class_teachers")
+        .upsert(
+          {
+            class_id: classItem.id,
+            teacher_id: teacher.id,
+          },
+          {
+            onConflict: "class_id,teacher_id",
+          }
+        );
+
+      if (teacherRelationError) {
+        throw new Error(teacherRelationError.message);
+      }
+
+      for (const studentName of payload.studentNames) {
+        const student = await getOrCreateStudent(studentName, payload.note);
+
+        const { error: studentRelationError } = await supabase
+          .from("class_students")
+          .upsert(
+            {
+              class_id: classItem.id,
+              student_id: student.id,
+            },
+            {
+              onConflict: "class_id,student_id",
+            }
+          );
+
+        if (studentRelationError) {
+          throw new Error(studentRelationError.message);
+        }
+      }
+
+      const { error: requestError } = await supabase
+        .from("admin_action_requests")
+        .update({
+          approvals_count: approvalCount,
+          status: "completed",
+          note: `${request.note}\n\n系统执行结果：班级已正式创建。`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", request.id);
+
+      if (requestError) {
+        throw new Error(requestError.message);
+      }
+
+      setMessage(
+        `班级创建成功：${payload.cohortName} / ${payload.className}。届别已自动复用或创建。`
+      );
+
+      await refreshData();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `创建班级失败：${error.message}`
+          : "创建班级失败：未知错误。"
+      );
+    }
+  }
+
+  async function approveCreateClassRequest(request: AdminActionRequest) {
+    const payload = readCreateClassPayload(request.note);
+
+    const confirmed = window.confirm(
+      `确认批准创建班级吗？\n\n届别：${
+        payload?.cohortName || "无法读取"
+      }\n班级：${payload?.className || request.target_name}\n小老师：${
+        payload?.teacherName || "无法读取"
+      }\n学生数：${payload?.studentNames.length || 0}\n\n当前确认数：${
+        request.approvals_count
+      }/${request.required_approvals}\n\n同一管理员不能重复确认。`
+    );
+
+    if (!confirmed) return;
+
+    const approvalCount = await registerApproval(request);
+
+    if (approvalCount === null) return;
+
+    if (approvalCount < request.required_approvals) {
+      setMessage(
+        `已记录一次确认。创建班级还需要 ${
+          request.required_approvals - approvalCount
+        } 次确认。`
+      );
+
+      await refreshData();
+      return;
+    }
+
+    await executeCreateClassRequest(request, approvalCount);
+  }
+
+  async function approveAllCreateClassRequests() {
+    const trimmedAdminName = currentAdminName.trim();
+
+    if (!trimmedAdminName) {
+      setMessage("请先填写当前管理员姓名。");
+      return;
+    }
+
+    if (createClassRequests.length === 0) {
+      setMessage("目前没有待确认的班级创建申请。");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `确认以管理员「${trimmedAdminName}」的身份，统一确认全部 ${createClassRequests.length} 个班级创建申请吗？\n\n同一管理员对同一个申请只能确认一次。已经确认过的申请会自动跳过。达到确认人数的申请会立即创建班级。`
+    );
+
+    if (!confirmed) return;
+
+    setIsApprovingAllCreateRequests(true);
+    setMessage("");
+
+    try {
+      let approvedCount = 0;
+      let skippedDuplicateCount = 0;
+      let completedCount = 0;
+      let failedCount = 0;
+
+      for (const request of createClassRequests) {
+        const { error: approvalError } = await supabase
+          .from("admin_action_approvals")
+          .insert({
+            request_id: request.id,
+            admin_name: trimmedAdminName,
+          });
+
+        if (approvalError) {
+          if (
+            approvalError.message.includes("duplicate") ||
+            approvalError.message.includes("unique")
+          ) {
+            skippedDuplicateCount += 1;
+            continue;
+          }
+
+          failedCount += 1;
+          continue;
+        }
+
+        approvedCount += 1;
+
+        const { count, error: countError } = await supabase
+          .from("admin_action_approvals")
+          .select("id", { count: "exact", head: true })
+          .eq("request_id", request.id);
+
+        if (countError) {
+          failedCount += 1;
+          continue;
+        }
+
+        const approvalCount = count || 0;
+
+        const { error: updateError } = await supabase
+          .from("admin_action_requests")
+          .update({
+            approvals_count: approvalCount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", request.id);
+
+        if (updateError) {
+          failedCount += 1;
+          continue;
+        }
+
+        if (approvalCount >= request.required_approvals) {
+          await executeCreateClassRequest(request, approvalCount);
+          completedCount += 1;
+        }
+      }
+
+      setMessage(
+        `统一确认完成：新增确认 ${approvedCount} 条，跳过已确认 ${skippedDuplicateCount} 条，正式创建 ${completedCount} 个班级，失败 ${failedCount} 条。`
+      );
+
+      await refreshData();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `统一确认失败：${error.message}`
+          : "统一确认失败：未知错误。"
+      );
+    } finally {
+      setIsApprovingAllCreateRequests(false);
+    }
+  }
+
+  async function cancelCreateClassRequest(request: AdminActionRequest) {
+    const confirmed = window.confirm(
+      `确认取消创建班级申请吗？\n\n申请：${request.target_name}\n\n取消后，这个班级不会被创建。`
+    );
+
+    if (!confirmed) return;
+
+    const { error: approvalError } = await supabase
+      .from("admin_action_approvals")
+      .delete()
+      .eq("request_id", request.id);
+
+    if (approvalError) {
+      setMessage(`清除确认记录失败：${approvalError.message}`);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("admin_action_requests")
+      .update({
+        status: "canceled",
+        approvals_count: 0,
+        note: `${request.note || ""}\n\n创建申请已取消。`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", request.id);
+
+    if (error) {
+      setMessage(`取消创建申请失败：${error.message}`);
+      return;
+    }
+
+    setMessage(`${request.target_name} 的创建申请已取消。`);
+    await refreshData();
   }
 
   function startEditingClass(classItem: ClassTableItem) {
@@ -676,6 +1027,7 @@ export default function AdminClassesPage() {
         .from("classes")
         .update({
           name: newClassName,
+          normalized_name: normalizeName(newClassName),
           school: newSchool || null,
         })
         .eq("id", classId);
@@ -767,7 +1119,7 @@ export default function AdminClassesPage() {
         status: "pending",
         approvals_count: 0,
         required_approvals: DELETE_CLASS_REQUIRED_APPROVALS,
-        requested_by: "当前管理员",
+        requested_by: currentAdminName.trim() || "当前管理员",
         note: "申请删除错建班级",
       });
 
@@ -818,6 +1170,7 @@ export default function AdminClassesPage() {
           status: "canceled",
           approvals_count: 0,
           note: "删除申请已撤回。",
+          updated_at: new Date().toISOString(),
         })
         .eq("id", request.id);
 
@@ -903,6 +1256,7 @@ export default function AdminClassesPage() {
           approvals_count: approvalCount,
           status: "completed",
           note: "班级已有课程记录，系统未真删除，已改为封存。",
+          updated_at: new Date().toISOString(),
         })
         .eq("id", request.id);
 
@@ -932,6 +1286,7 @@ export default function AdminClassesPage() {
       .update({
         approvals_count: approvalCount,
         status: "completed",
+        updated_at: new Date().toISOString(),
       })
       .eq("id", request.id);
 
@@ -987,7 +1342,7 @@ export default function AdminClassesPage() {
           status: "pending",
           approvals_count: 0,
           required_approvals: TOTAL_ADMIN_COUNT,
-          requested_by: "当前管理员",
+          requested_by: currentAdminName.trim() || "当前管理员",
           note: "学年结束，申请封存整届班级，并同步归档只属于该届的老师和学生。",
         });
 
@@ -1191,6 +1546,7 @@ export default function AdminClassesPage() {
         approvals_count: approvalCount,
         status: "completed",
         note: "整届已封存；只属于该届的老师和学生已同步归档。",
+        updated_at: new Date().toISOString(),
       })
       .eq("id", request.id);
 
@@ -1229,6 +1585,7 @@ export default function AdminClassesPage() {
         status: "canceled",
         approvals_count: 0,
         note: "封存申请已取消。",
+        updated_at: new Date().toISOString(),
       })
       .eq("id", request.id);
 
@@ -1247,6 +1604,12 @@ export default function AdminClassesPage() {
       request.target_type === "cohort"
   );
 
+  const createClassRequests = requests.filter(
+    (request) =>
+      request.action_type === "create_class" &&
+      request.target_type === "class"
+  );
+
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
       <section className="mx-auto max-w-7xl">
@@ -1256,7 +1619,7 @@ export default function AdminClassesPage() {
               班级与分班管理
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里用于批量导入分班结果、修改班级信息、处理删除申请和封存旧届别。整届封存会同步归档只属于该届的老师和学生。
+              这里用于批量提交分班创建申请、修改班级信息、处理删除申请和封存旧届别。新增班级需要管理员确认后才会正式写入系统。
             </p>
           </div>
 
@@ -1280,10 +1643,109 @@ export default function AdminClassesPage() {
           </div>
         </div>
 
+        <section className="mb-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+          <p className="font-semibold text-emerald-900">当前确认管理员</p>
+
+          <p className="mt-2 text-sm leading-7 text-stone-600">
+            现在还没有正式登录系统，所以先用管理员姓名模拟。所有创建、删除和封存确认都会记录这个名字，同一管理员不能重复确认同一个申请。
+          </p>
+
+          <input
+            value={currentAdminName}
+            onChange={(event) => setCurrentAdminName(event.target.value)}
+            placeholder="填写当前管理员姓名，例如 Ethan"
+            className="mt-3 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none focus:border-emerald-500 md:max-w-sm"
+          />
+        </section>
+
         {message && (
           <div className="mb-6 rounded-2xl border border-emerald-100 bg-white p-4 text-sm font-semibold text-emerald-800 shadow-sm">
             {message}
           </div>
+        )}
+
+        {createClassRequests.length > 0 && (
+          <section className="mb-6 rounded-[1.75rem] border border-amber-100 bg-amber-50 p-5 shadow-sm md:p-6">
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <h2 className="text-xl font-bold text-amber-900">
+                  待确认班级创建申请
+                </h2>
+
+                <p className="mt-2 text-sm leading-7 text-amber-800">
+                  创建班级属于高影响操作。只有管理员确认数达到要求后，系统才会真正创建届别、班级、小老师和学生关系。
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={approveAllCreateClassRequests}
+                disabled={
+                  isApprovingAllCreateRequests || createClassRequests.length === 0
+                }
+                className="w-fit rounded-full bg-amber-100 px-5 py-2.5 text-sm font-semibold text-amber-900 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isApprovingAllCreateRequests
+                  ? "正在统一确认..."
+                  : `统一确认全部 ${createClassRequests.length} 个申请`}
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {createClassRequests.map((request) => {
+                const payload = readCreateClassPayload(request.note);
+
+                return (
+                  <div
+                    key={request.id}
+                    className="rounded-2xl border border-amber-100 bg-white p-4"
+                  >
+                    <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                      <div>
+                        <p className="text-sm font-bold text-amber-900">
+                          {payload
+                            ? `${payload.cohortName} / ${payload.className}`
+                            : request.target_name}
+                        </p>
+
+                        {payload && (
+                          <div className="mt-2 space-y-1 text-sm text-stone-600">
+                            <p>合作学校：{payload.school || "未填写"}</p>
+                            <p>小老师：{payload.teacherName}</p>
+                            <p>学生：{payload.studentNames.join("、")}</p>
+                            {payload.note && <p>备注：{payload.note}</p>}
+                          </div>
+                        )}
+
+                        <p className="mt-2 text-sm font-semibold text-amber-800">
+                          当前确认数：{request.approvals_count}/
+                          {request.required_approvals}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => approveCreateClassRequest(request)}
+                          className="rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-200"
+                        >
+                          确认创建
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => cancelCreateClassRequest(request)}
+                          className="rounded-full border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                        >
+                          取消申请
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         )}
 
         {showImportPanel ? (
@@ -1291,7 +1753,7 @@ export default function AdminClassesPage() {
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
               <div>
                 <h2 className="text-2xl font-bold text-emerald-950">
-                  批量导入分班表
+                  批量提交分班创建申请
                 </h2>
 
                 <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
@@ -1300,7 +1762,7 @@ export default function AdminClassesPage() {
                     {" "}
                     届别、班级名称、合作学校、小老师、学生名单、备注
                   </span>
-                  。学生名单可以用顿号、逗号、分号分隔。
+                  。学生名单可以用顿号、逗号、分号分隔。提交后不会直接创建班级，需要管理员确认。
                 </p>
               </div>
 
@@ -1361,7 +1823,7 @@ export default function AdminClassesPage() {
                 disabled={isImporting || importText.trim().length === 0}
                 className="rounded-full border border-emerald-700 px-6 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isImporting ? "正在导入..." : "确认导入班级"}
+                {isImporting ? "正在提交..." : "提交创建申请"}
               </button>
             </div>
 
@@ -1767,21 +2229,6 @@ export default function AdminClassesPage() {
             <p className="mt-2 text-sm leading-7 text-stone-600">
               这个区域只在一届课程真正结束后使用。封存会把这一届所有班级改为已封存，并同步归档只属于这一届的老师和学生。封存需要所有管理员确认，目前系统临时设定为 {TOTAL_ADMIN_COUNT} 位管理员。
             </p>
-
-            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
-              <p className="font-semibold text-red-800">当前确认管理员</p>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                现在还没有正式登录系统，所以先用管理员姓名模拟。之后接入 Auth 后，会自动使用当前登录管理员账号。
-              </p>
-
-              <input
-                value={currentAdminName}
-                onChange={(event) => setCurrentAdminName(event.target.value)}
-                placeholder="填写当前管理员姓名，例如 Ethan"
-                className="mt-3 w-full rounded-2xl border border-red-100 bg-white px-4 py-3 text-sm outline-none focus:border-red-300 md:max-w-sm"
-              />
-            </div>
 
             <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center">
               <select
