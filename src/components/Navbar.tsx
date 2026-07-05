@@ -1,4 +1,5 @@
 import Link from "next/link";
+import StudentAccountMenu from "@/components/StudentAccountMenu";
 
 export default function Navbar() {
   return (
@@ -17,9 +18,8 @@ export default function Navbar() {
         <Link href="/donation">资助我们</Link>
       </nav>
 
-      <Link href="/login" className="startButton">
-        登陆
-      </Link>
+      <StudentAccountMenu />
+
     </header>
   );
 }

@@ -1,15 +1,35 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-const DEMO_STUDENT_ID = "77777777-7777-7777-7777-777777777777";
-const DEMO_STUDENT_NAME = "学生 A";
-const DEMO_CLASS_ID = "22222222-2222-2222-2222-222222222222";
+type StudentSession = {
+  studentId: string;
+  studentName: string;
+  classId: string;
+  className: string;
+  loggedInAt: string;
+};
 
-const studentInfo = {
-  name: DEMO_STUDENT_NAME,
-  className: "秋叶班",
-  classmateName: "学生 A",
-  teacherName: "小老师姓名",
+type StudentRow = {
+  id: string;
+  name: string;
+  note: string | null;
+  status: string;
+  student_code: string | null;
+  pin_code: string | null;
+};
+
+type ClassRelation = {
+  class_id: string;
+  classes: any;
+};
+
+type ClassmateRelation = {
+  student_id: string;
+  students: any;
 };
 
 type TeachingGoal = {
@@ -41,42 +61,209 @@ type StudentLessonComment = {
   created_at: string;
 };
 
-export const dynamic = "force-dynamic";
+export default function StudentPage() {
+  const router = useRouter();
 
-export default async function StudentPage() {
-  const { data: goalsFromSupabase } = await supabase
-    .from("teaching_goals")
-    .select("id, title, description, expected_lessons, status")
-    .eq("class_id", DEMO_CLASS_ID)
-    .eq("status", "active")
-    .order("created_at", { ascending: false });
+  const [session, setSession] = useState<StudentSession | null>(null);
+  const [student, setStudent] = useState<StudentRow | null>(null);
+  const [classRelation, setClassRelation] = useState<ClassRelation | null>(null);
+  const [classmates, setClassmates] = useState<StudentRow[]>([]);
+  const [goals, setGoals] = useState<TeachingGoal[]>([]);
+  const [records, setRecords] = useState<LessonRecord[]>([]);
+  const [latestRecordComments, setLatestRecordComments] = useState<
+    StudentLessonComment[]
+  >([]);
 
-  const goals = (goalsFromSupabase || []) as TeachingGoal[];
-  const currentGoal = goals[0];
+  const [isLoading, setIsLoading] = useState(true);
+  const [message, setMessage] = useState("");
 
-  const { data: recordsFromSupabase } = await supabase
-    .from("lesson_records")
-    .select(
-      "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, created_at"
-    )
-    .eq("class_id", DEMO_CLASS_ID)
-    .order("lesson_date", { ascending: false })
-    .order("created_at", { ascending: false });
+  async function fetchStudentData(activeSession: StudentSession) {
+    setIsLoading(true);
+    setMessage("");
 
-  const records = (recordsFromSupabase || []) as LessonRecord[];
-  const latestRecord = records[0];
+    const { data: studentFromSupabase, error: studentError } = await supabase
+      .from("students")
+      .select("id, name, note, status, student_code, pin_code")
+      .eq("id", activeSession.studentId)
+      .maybeSingle();
 
-  const { data: latestRecordCommentsFromSupabase } = latestRecord
-    ? await supabase
+    if (studentError) {
+      setMessage(`读取学生资料失败：${studentError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!studentFromSupabase) {
+      setMessage("没有找到学生资料，请重新登录。");
+      setIsLoading(false);
+      return;
+    }
+
+    const studentData = studentFromSupabase as StudentRow;
+
+    if (studentData.status === "withdrawn" || studentData.status === "archived") {
+      setMessage("这个学生账号当前不可用。如有疑问，请联系 ORP 管理员。");
+      setIsLoading(false);
+      return;
+    }
+
+    const { data: classRelationsFromSupabase, error: classRelationError } =
+      await supabase
+        .from("class_students")
+        .select(
+          `
+          class_id,
+          classes (
+            id,
+            name,
+            school,
+            status,
+            class_code,
+            cohorts (
+              id,
+              name,
+              status
+            ),
+            class_teachers (
+              teachers (
+                id,
+                name,
+                email
+              )
+            )
+          )
+        `
+        )
+        .eq("student_id", activeSession.studentId)
+        .eq("class_id", activeSession.classId);
+
+    if (classRelationError) {
+      setMessage(`读取班级信息失败：${classRelationError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    const relation = ((classRelationsFromSupabase || []) as ClassRelation[])[0];
+
+    const { data: classmatesFromSupabase, error: classmatesError } =
+      await supabase
+        .from("class_students")
+        .select(
+          `
+          student_id,
+          students (
+            id,
+            name,
+            note,
+            status,
+            student_code,
+            pin_code
+          )
+        `
+        )
+        .eq("class_id", activeSession.classId);
+
+    if (classmatesError) {
+      setMessage(`读取同学信息失败：${classmatesError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    const classmateRows = ((classmatesFromSupabase || []) as ClassmateRelation[])
+      .map((relationItem) => relationItem.students)
+      .filter(Boolean)
+      .filter((classmate) => classmate.id !== activeSession.studentId)
+      .filter((classmate) => classmate.status !== "withdrawn")
+      .filter((classmate) => classmate.status !== "archived") as StudentRow[];
+
+    const { data: goalsFromSupabase, error: goalsError } = await supabase
+      .from("teaching_goals")
+      .select("id, title, description, expected_lessons, status")
+      .eq("class_id", activeSession.classId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
+
+    if (goalsError) {
+      setMessage(`读取学习计划失败：${goalsError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    const { data: recordsFromSupabase, error: recordsError } = await supabase
+      .from("lesson_records")
+      .select(
+        "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, created_at"
+      )
+      .eq("class_id", activeSession.classId)
+      .order("lesson_date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (recordsError) {
+      setMessage(`读取课程记录失败：${recordsError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    const lessonRecords = (recordsFromSupabase || []) as LessonRecord[];
+    const latestRecord = lessonRecords[0];
+
+    let commentsForLatestRecord: StudentLessonComment[] = [];
+
+    if (latestRecord) {
+      const { data: commentsFromSupabase, error: commentsError } = await supabase
         .from("student_lesson_comments")
         .select("id, lesson_record_id, student_name, comment, created_at")
-        .eq("student_id", DEMO_STUDENT_ID)
+        .eq("student_id", activeSession.studentId)
         .eq("lesson_record_id", latestRecord.id)
-        .order("created_at", { ascending: false })
-    : { data: [] };
+        .order("created_at", { ascending: false });
 
-  const latestRecordComments =
-    (latestRecordCommentsFromSupabase || []) as StudentLessonComment[];
+      if (commentsError) {
+        setMessage(`读取留言失败：${commentsError.message}`);
+        setIsLoading(false);
+        return;
+      }
+
+      commentsForLatestRecord =
+        (commentsFromSupabase || []) as StudentLessonComment[];
+    }
+
+    setStudent(studentData);
+    setClassRelation(relation || null);
+    setClassmates(classmateRows);
+    setGoals((goalsFromSupabase || []) as TeachingGoal[]);
+    setRecords(lessonRecords);
+    setLatestRecordComments(commentsForLatestRecord);
+    setIsLoading(false);
+  }
+
+  useEffect(() => {
+    const storedSession = localStorage.getItem("orp_student_session");
+
+    if (!storedSession) {
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const parsedSession = JSON.parse(storedSession) as StudentSession;
+
+      if (!parsedSession.studentId || !parsedSession.classId) {
+        localStorage.removeItem("orp_student_session");
+        setIsLoading(false);
+        return;
+      }
+
+      setSession(parsedSession);
+      fetchStudentData(parsedSession);
+    } catch {
+      localStorage.removeItem("orp_student_session");
+      setIsLoading(false);
+    }
+  }, []);
+
+
+  const currentGoal = goals[0];
+  const latestRecord = records[0];
 
   const hasCommentForLatestRecord = latestRecordComments.length > 0;
 
@@ -86,9 +273,71 @@ export default async function StudentPage() {
 
   const expectedLessons = currentGoal?.expected_lessons || 0;
 
+  const teacherNames = Array.from(
+    new Set(
+      (classRelation?.classes?.class_teachers || [])
+        .map((item: any) => item.teachers?.name)
+        .filter(Boolean)
+    )
+  );
+
+  const classmateNames = classmates.map((classmate) => classmate.name);
+
+  const studentInfo = {
+    name: student?.name || session?.studentName || "学生",
+    className:
+      classRelation?.classes?.name || session?.className || "暂未读取班级",
+    classmateName:
+      classmateNames.length > 0 ? classmateNames.join("、") : "暂无其他同学",
+    teacherName: teacherNames.length > 0 ? teacherNames.join("、") : "暂无小老师",
+  };
+
+  if (isLoading) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-4xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm">
+          <p className="text-sm text-stone-600">正在读取学生信息...</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-4xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#2f5d50]">
+            ORP 学习空间
+          </p>
+
+          <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+            请先登录学生端
+          </h1>
+
+          <p className="mt-3 text-sm leading-7 text-stone-600">
+            你需要使用班级码、学生码和 PIN 登录后，才能查看自己的学习记录。
+          </p>
+
+          <Link
+            href="/student-login"
+            className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
+          >
+            前往学生登录
+          </Link>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
       <section className="mx-auto max-w-4xl">
+        {message && (
+          <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            {message}
+          </div>
+        )}
+
         <section className="grid gap-5 md:grid-cols-[0.8fr_1.4fr]">
           <aside className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
             <div className="flex items-center gap-4">
@@ -116,8 +365,8 @@ export default async function StudentPage() {
               </div>
 
               <div className="rounded-2xl bg-[#fffdf4] px-4 py-3">
-                <p className="text-xs text-stone-500">同学</p>
-                <p className="mt-1 text-sm font-semibold text-emerald-950">
+                <p className="text-xs text-stone-500">我的同学</p>
+                <p className="mt-1 text-sm font-semibold leading-6 text-emerald-950">
                   {studentInfo.classmateName}
                 </p>
               </div>
@@ -137,7 +386,7 @@ export default async function StudentPage() {
             </p>
 
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-              你好，{DEMO_STUDENT_NAME}
+              你好，{studentInfo.name}
             </h1>
 
             <p className="mt-3 text-sm leading-7 text-stone-600">
@@ -224,7 +473,7 @@ export default async function StudentPage() {
                   <p className="text-sm font-semibold text-emerald-700">
                     这节课学了什么
                   </p>
-                  <p className="mt-2 leading-8 text-stone-700">
+                  <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
                     {latestRecord.lesson_content_and_feedback}
                   </p>
                 </div>
@@ -234,7 +483,7 @@ export default async function StudentPage() {
                     <p className="text-sm font-semibold text-emerald-700">
                       课后小任务
                     </p>
-                    <p className="mt-2 leading-8 text-stone-700">
+                    <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
                       {latestRecord.homework}
                     </p>
                   </div>
@@ -245,7 +494,7 @@ export default async function StudentPage() {
                     <p className="text-sm font-semibold text-emerald-700">
                       下次课预告
                     </p>
-                    <p className="mt-2 leading-8 text-stone-700">
+                    <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
                       {latestRecord.next_plan}
                     </p>
                   </div>
@@ -256,9 +505,14 @@ export default async function StudentPage() {
                     <p className="text-sm font-semibold text-emerald-700">
                       学习材料
                     </p>
-                    <p className="mt-2 break-all leading-7 text-stone-700">
-                      {latestRecord.material_link}
-                    </p>
+                    <a
+                      href={latestRecord.material_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-block break-all text-sm font-semibold text-emerald-700 underline"
+                    >
+                      打开学习材料
+                    </a>
                   </div>
                 )}
               </div>
@@ -274,8 +528,8 @@ export default async function StudentPage() {
 
                     <p className="mt-2 text-sm leading-7 text-stone-600">
                       {hasCommentForLatestRecord
-                        ? "你可以去课程记录里点击展开来查看或修改自己写过的留言。"
-                        : "你可以在课程记录里点击展开然后给这节课写一句留言。"}
+                        ? "你可以去课程记录里点击展开来查看或继续补充留言。"
+                        : "你可以在课程记录里点击展开，然后给这节课写一句留言。"}
                     </p>
                   </div>
                 </div>
