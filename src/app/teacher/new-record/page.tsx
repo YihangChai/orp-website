@@ -1,14 +1,33 @@
 "use client";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-const DEMO_TEACHER_ID = "6cd37c11-61dc-4150-bb24-911ba3a6eebd";
+
+type TeacherSession = {
+  teacherId: string;
+  teacherName: string;
+  loggedInAt: string;
+};
 
 type TeachingGoal = {
   id: string;
+  class_id: string | null;
   title: string;
   expected_lessons: number | null;
+};
+
+type ClassItem = {
+  id: string;
+  name: string;
+  school: string | null;
+  status: string;
+};
+
+type ClassTeacherRelation = {
+  class_id: string;
+  classes: any;
 };
 
 type ClassStudentItem = {
@@ -18,70 +37,182 @@ type ClassStudentItem = {
   status: string;
 };
 
-const classInfo = {
-  id: "887614b6-f449-4757-8b5b-7dfca9a16d7b",
-  name: "秋叶班",
-  teacher: "小老师姓名",
-};
-
-
-const students = [
-  {
-    id: "44444444-4444-4444-4444-444444444444",
-    name: "学生 A",
-  },
-  {
-    id: "55555555-5555-5555-5555-555555555555",
-    name: "学生 B",
-  },
-  {
-    id: "66666666-6666-6666-6666-666666666666",
-    name: "学生 C",
-  },
-];
-
 function getTodayDate() {
   const today = new Date();
   return today.toISOString().split("T")[0];
 }
 
 export default function NewRecordPage() {
-  const today = getTodayDate();
   const router = useRouter();
+  const today = getTodayDate();
+
+  const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(
+    null
+  );
+
+  const [classes, setClasses] = useState<ClassItem[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState("");
+
   const [goals, setGoals] = useState<TeachingGoal[]>([]);
-  const [isLoadingGoals, setIsLoadingGoals] = useState(true);
+  const [students, setStudents] = useState<ClassStudentItem[]>([]);
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>(
+    {}
+  );
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingClassData, setIsLoadingClassData] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
-  const [students, setStudents] = useState<ClassStudentItem[]>([]);
-  const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({});
+
+  async function fetchClassData(classId: string, teacherId: string) {
+    setIsLoadingClassData(true);
+    setMessage("");
+
+    const { data: classStudentsData, error: classStudentsError } =
+      await supabase
+        .from("class_students")
+        .select(
+          `
+          students (
+            id,
+            name,
+            note,
+            status
+          )
+        `
+        )
+        .eq("class_id", classId);
+
+    if (classStudentsError) {
+      setMessage(`读取学生名单失败：${classStudentsError.message}`);
+      setIsLoadingClassData(false);
+      return;
+    }
+
+    const formattedStudents = (classStudentsData || [])
+      .map((item: any) => item.students)
+      .filter(Boolean)
+      .filter((student: ClassStudentItem) => student.status !== "withdrawn")
+      .filter((student: ClassStudentItem) => student.status !== "archived") as ClassStudentItem[];
+
+    setStudents(formattedStudents);
+
+    const initialAttendance: Record<string, boolean> = {};
+
+    formattedStudents.forEach((student) => {
+      initialAttendance[student.id] = true;
+    });
+
+    setAttendanceMap(initialAttendance);
+
+    const { data: goalsData, error: goalsError } = await supabase
+      .from("teaching_goals")
+      .select("id, class_id, title, expected_lessons")
+      .eq("teacher_id", teacherId)
+      .eq("class_id", classId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
+
+    if (goalsError) {
+      setMessage(`读取教学目标失败：${goalsError.message}`);
+      setIsLoadingClassData(false);
+      return;
+    }
+
+    setGoals((goalsData || []) as TeachingGoal[]);
+    setIsLoadingClassData(false);
+  }
 
   useEffect(() => {
-    async function loadGoals() {
-      setIsLoadingGoals(true);
-      fetchClassStudents();
+    async function initPage() {
+      const storedSession = localStorage.getItem("orp_teacher_session");
 
-      const { data, error } = await supabase
-        .from("teaching_goals")
-        .select("id, title, expected_lessons")
-        .eq("teacher_id", DEMO_TEACHER_ID)
-        .eq("status", "active")
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        setMessage(`读取教学目标失败：${error.message}`);
-        setIsLoadingGoals(false);
+      if (!storedSession) {
+        setIsLoading(false);
         return;
       }
 
-      setGoals((data || []) as TeachingGoal[]);
-      setIsLoadingGoals(false);
+      try {
+        const parsedSession = JSON.parse(storedSession) as TeacherSession;
+
+        if (!parsedSession.teacherId) {
+          localStorage.removeItem("orp_teacher_session");
+          setIsLoading(false);
+          return;
+        }
+
+        setTeacherSession(parsedSession);
+
+        const { data: classTeacherData, error: classTeacherError } =
+          await supabase
+            .from("class_teachers")
+            .select(
+              `
+              class_id,
+              classes (
+                id,
+                name,
+                school,
+                status
+              )
+            `
+            )
+            .eq("teacher_id", parsedSession.teacherId);
+
+        if (classTeacherError) {
+          setMessage(`读取小老师班级失败：${classTeacherError.message}`);
+          setIsLoading(false);
+          return;
+        }
+
+        const classRows = ((classTeacherData || []) as ClassTeacherRelation[])
+          .map((relation) => relation.classes)
+          .filter(Boolean)
+          .filter((classItem) => classItem.status !== "archived") as ClassItem[];
+
+        setClasses(classRows);
+
+        if (classRows.length === 0) {
+          setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
+          setIsLoading(false);
+          return;
+        }
+
+        if (classRows.length > 1) {
+          setMessage(
+            "检测到这个小老师绑定了多个班级。第一版系统要求一个小老师只对应一个班级，请先在管理员端检查分班数据。"
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        const teacherClass = classRows[0];
+
+        setSelectedClassId(teacherClass.id);
+        await fetchClassData(teacherClass.id, parsedSession.teacherId);
+
+        setIsLoading(false);
+      } catch {
+        localStorage.removeItem("orp_teacher_session");
+        setIsLoading(false);
+      }
     }
 
-    loadGoals();
+    initPage();
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!teacherSession) {
+      setMessage("请先回到小老师主页，选择小老师身份。");
+      return;
+    }
+
+    if (!selectedClassId) {
+      setMessage("没有读取到小老师对应的班级。");
+      return;
+    }
 
     setIsSubmitting(true);
     setMessage("");
@@ -100,9 +231,12 @@ export default function NewRecordPage() {
     const materialLink = String(formData.get("material_link") || "");
     const teacherReflection = String(formData.get("teacher_reflection") || "");
 
-    const presentStudentIds = formData.getAll("attendance").map(String);
-
-    if (!lessonDate || !durationMinutes || !lessonTitle || !lessonContentAndFeedback) {
+    if (
+      !lessonDate ||
+      !durationMinutes ||
+      !lessonTitle ||
+      !lessonContentAndFeedback
+    ) {
       setMessage("请填写上课日期、授课时长、本节课主题和课程内容。");
       setIsSubmitting(false);
       return;
@@ -111,8 +245,8 @@ export default function NewRecordPage() {
     const { data: insertedLesson, error: lessonError } = await supabase
       .from("lesson_records")
       .insert({
-        teacher_id: DEMO_TEACHER_ID,
-        class_id: classInfo.id,
+        teacher_id: teacherSession.teacherId,
+        class_id: selectedClassId,
         goal_id: goalId || null,
         lesson_date: lessonDate,
         duration_minutes: durationMinutes,
@@ -139,59 +273,68 @@ export default function NewRecordPage() {
       is_present: attendanceMap[student.id] ?? false,
     }));
 
-
     if (attendanceRows.length > 0) {
       const { error: attendanceError } = await supabase
         .from("lesson_attendance")
         .insert(attendanceRows);
+
       if (attendanceError) {
         setMessage(`课程记录已提交，但学生出勤保存失败：${attendanceError.message}`);
+        setIsSubmitting(false);
         return;
       }
     }
 
-      setMessage("课程记录和学生出勤已提交。");
-      setIsSubmitting(false);
-      router.push("/teacher");
-      router.refresh();
-  }
-  async function fetchClassStudents() {
-    const { data, error } = await supabase
-      .from("class_students")
-      .select(
-        `
-        students (
-          id,
-          name,
-          note,
-          status
-        )
-      `
-      )
-      .eq("class_id", classInfo.id);
+    setMessage("课程记录和学生出勤已提交。");
+    setIsSubmitting(false);
 
-    if (error) {
-      setMessage(`读取学生名单失败：${error.message}`);
-      return;
-    }
-
-    const formattedStudents =
-      data
-        ?.map((item: any) => item.students)
-        .filter(Boolean)
-        .filter((student: any) => student.status === "active") || [];
-
-    setStudents(formattedStudents);
-
-    const initialAttendance: Record<string, boolean> = {};
-
-    formattedStudents.forEach((student: ClassStudentItem) => {
-      initialAttendance[student.id] = true;
-    });
-
-    setAttendanceMap(initialAttendance);
+    router.push("/teacher");
+    router.refresh();
   }
 
+  const selectedClass = classes.find(
+    (classItem) => classItem.id === selectedClassId
+  );
+
+  if (isLoading) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+        <section className="mx-auto max-w-4xl rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm">
+          <p className="text-sm text-stone-600">正在读取小老师信息...</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!teacherSession) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+        <section className="mx-auto max-w-4xl rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm">
+          <Link
+            href="/teacher"
+            className="text-sm font-semibold text-emerald-800 hover:text-emerald-950"
+          >
+            ← 返回小老师主页
+          </Link>
+
+          <h1 className="mt-4 text-3xl font-bold text-emerald-950">
+            请先选择小老师身份
+          </h1>
+
+          <p className="mt-3 leading-7 text-stone-600">
+            现在是测试阶段。你需要先回到小老师主页，从下拉框选择一个小老师身份，然后再添加授课记录。
+          </p>
+
+          <Link
+            href="/teacher"
+            className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
+          >
+            去选择小老师身份
+          </Link>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
@@ -209,14 +352,22 @@ export default function NewRecordPage() {
           </h1>
 
           <p className="mt-4 leading-8 text-stone-600">
-            请记录本节课的基本信息、出勤情况、课程内容和后续计划。
-            学生反馈会在课程记录生成后由学生单独留言。
+            当前小老师：
+            <span className="font-semibold text-emerald-800">
+              {teacherSession.teacherName}
+            </span>
+            。请记录本节课的基本信息、出勤情况、课程内容和后续计划。
           </p>
+
+          {message && (
+            <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-800">
+              {message}
+            </div>
+          )}
         </div>
 
         <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
           <form onSubmit={handleSubmit} className="space-y-7">
-            {/* 基本信息 */}
             <section>
               <h2 className="text-2xl font-bold text-emerald-950">
                 基本信息
@@ -230,13 +381,13 @@ export default function NewRecordPage() {
 
                   <input
                     type="text"
-                    value={classInfo.name}
+                    value={selectedClass?.name || "未读取到班级"}
                     readOnly
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-stone-100 px-4 py-3 text-stone-600 outline-none"
                   />
 
                   <p className="mt-2 text-xs leading-5 text-stone-500">
-                    班级根据当前小老师账号自动填写，后续不可在这里手动更改。
+                    班级根据当前小老师身份自动填写，不能在这里手动更改。
                   </p>
                 </div>
 
@@ -247,16 +398,21 @@ export default function NewRecordPage() {
 
                   <select
                     name="goal_id"
-                    disabled={isLoadingGoals}
+                    disabled={isLoadingClassData}
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <option value="">
-                      {isLoadingGoals ? "正在读取教学目标..." : "不关联教学目标"}
+                      {isLoadingClassData
+                        ? "正在读取教学目标..."
+                        : "不关联教学目标"}
                     </option>
+
                     {goals.map((goal) => (
                       <option key={goal.id} value={goal.id}>
                         {goal.title}
-                        {goal.expected_lessons ? `（计划 ${goal.expected_lessons} 节）` : ""}
+                        {goal.expected_lessons
+                          ? `（计划 ${goal.expected_lessons} 节）`
+                          : ""}
                       </option>
                     ))}
                   </select>
@@ -287,6 +443,7 @@ export default function NewRecordPage() {
                   <input
                     type="number"
                     name="duration_minutes"
+                    defaultValue={40}
                     placeholder="例如：40"
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
                   />
@@ -307,7 +464,6 @@ export default function NewRecordPage() {
               </div>
             </section>
 
-            {/* 出勤 */}
             <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-bold text-emerald-950">学生出勤</h2>
 
@@ -327,7 +483,10 @@ export default function NewRecordPage() {
                       className="flex cursor-pointer items-center justify-between rounded-2xl bg-[#fffdf4] p-4 text-sm"
                     >
                       <div>
-                        <p className="font-semibold text-emerald-950">{student.name}</p>
+                        <p className="font-semibold text-emerald-950">
+                          {student.name}
+                        </p>
+
                         <p className="mt-1 text-xs text-stone-500">
                           {student.note || "暂无备注"}
                         </p>
@@ -337,8 +496,8 @@ export default function NewRecordPage() {
                         type="checkbox"
                         checked={attendanceMap[student.id] ?? false}
                         onChange={(event) => {
-                          setAttendanceMap((prev) => ({
-                            ...prev,
+                          setAttendanceMap((previousMap) => ({
+                            ...previousMap,
                             [student.id]: event.target.checked,
                           }));
                         }}
@@ -350,7 +509,6 @@ export default function NewRecordPage() {
               )}
             </section>
 
-            {/* 课程内容 */}
             <section className="border-t border-emerald-100 pt-7">
               <h2 className="text-2xl font-bold text-emerald-950">
                 课程内容与课后安排
@@ -413,7 +571,6 @@ export default function NewRecordPage() {
               </div>
             </section>
 
-            {/* 私密反思 */}
             <section className="border-t border-emerald-100 pt-7">
               <div className="rounded-2xl border border-emerald-100 bg-[#edf3df] p-5">
                 <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
@@ -441,26 +598,19 @@ export default function NewRecordPage() {
               </div>
             </section>
 
-            {/* 保存 */}
             <div className="flex flex-col gap-3 border-t border-emerald-100 pt-6 md:flex-row md:items-center md:justify-between">
               <p className="text-sm leading-6 text-stone-500">
-                当前版本会把课程记录保存到 Supabase。正式账号系统完成后，班级和老师信息会自动来自登录身份。
+                当前版本会根据小老师工作台中选择的身份，自动保存真实 teacher_id、class_id 和学生出勤。
               </p>
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !selectedClassId}
                 className="rounded-full bg-[#cfe8d6] px-7 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSubmitting ? "保存中..." : "保存记录"}
               </button>
             </div>
-
-            {message && (
-              <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] px-5 py-4 text-sm font-semibold text-emerald-900">
-                {message}
-              </div>
-            )}
           </form>
         </section>
       </div>

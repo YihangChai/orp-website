@@ -1,10 +1,30 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-const DEMO_TEACHER_ID = "11111111-1111-1111-1111-111111111111";
+type TeacherSession = {
+  teacherId: string;
+  teacherName: string;
+  loggedInAt: string;
+};
+
+type ClassItem = {
+  id: string;
+  name: string;
+  school: string | null;
+  status: string;
+};
+
+type ClassTeacherRelation = {
+  class_id: string;
+  classes: any;
+};
 
 type TeachingGoal = {
   id: string;
+  class_id: string | null;
   title: string;
   description: string | null;
   start_date: string | null;
@@ -17,6 +37,7 @@ type TeachingGoal = {
 type LessonRecord = {
   id: string;
   goal_id: string | null;
+  class_id: string | null;
   lesson_date: string;
   duration_minutes: number;
   lesson_title: string;
@@ -39,67 +60,243 @@ type GoalWithProgress = TeachingGoal & {
   completed_lessons: number;
 };
 
-export const dynamic = "force-dynamic";
+export default function TeacherGoalsPage() {
+  const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(
+    null
+  );
+  const [teacherClass, setTeacherClass] = useState<ClassItem | null>(null);
 
-export default async function TeacherGoalsPage() {
-  const { data: goalsFromSupabase } = await supabase
-    .from("teaching_goals")
-    .select(
-      "id, title, description, start_date, expected_lessons, status, created_at, completed_at"
-    )
-    .eq("teacher_id", DEMO_TEACHER_ID)
-    .order("created_at", { ascending: false });
+  const [goals, setGoals] = useState<TeachingGoal[]>([]);
+  const [records, setRecords] = useState<LessonRecord[]>([]);
+  const [comments, setComments] = useState<StudentLessonComment[]>([]);
 
-  const goals = (goalsFromSupabase || []) as TeachingGoal[];
+  const [isLoading, setIsLoading] = useState(true);
+  const [message, setMessage] = useState("");
 
-  const { data: recordsFromSupabase } = await supabase
-    .from("lesson_records")
-    .select(
-      "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, teacher_reflection, created_at"
-    )
-    .eq("teacher_id", DEMO_TEACHER_ID)
-    .order("lesson_date", { ascending: false })
-    .order("created_at", { ascending: false });
+  useEffect(() => {
+    async function initPage() {
+      setIsLoading(true);
+      setMessage("");
 
-  const records = (recordsFromSupabase || []) as LessonRecord[];
+      const storedSession = localStorage.getItem("orp_teacher_session");
 
-  const { data: commentsFromSupabase } = await supabase
-    .from("student_lesson_comments")
-    .select("id, lesson_record_id, student_name, comment");
+      if (!storedSession) {
+        setIsLoading(false);
+        return;
+      }
 
-  const comments = (commentsFromSupabase || []) as StudentLessonComment[];
+      try {
+        const parsedSession = JSON.parse(storedSession) as TeacherSession;
 
-  const commentsByLesson = new Map<string, StudentLessonComment[]>();
+        if (!parsedSession.teacherId) {
+          localStorage.removeItem("orp_teacher_session");
+          setIsLoading(false);
+          return;
+        }
 
-  comments.forEach((comment) => {
-    const existingComments =
-      commentsByLesson.get(comment.lesson_record_id) || [];
+        setTeacherSession(parsedSession);
 
-    commentsByLesson.set(comment.lesson_record_id, [
-      ...existingComments,
-      comment,
-    ]);
-  });
+        const { data: classTeacherData, error: classTeacherError } =
+          await supabase
+            .from("class_teachers")
+            .select(
+              `
+              class_id,
+              classes (
+                id,
+                name,
+                school,
+                status
+              )
+            `
+            )
+            .eq("teacher_id", parsedSession.teacherId);
 
-  const goalMap = new Map<string, TeachingGoal>();
+        if (classTeacherError) {
+          setMessage(`读取小老师班级失败：${classTeacherError.message}`);
+          setIsLoading(false);
+          return;
+        }
 
-  goals.forEach((goal) => {
-    goalMap.set(goal.id, goal);
-  });
+        const classRows = ((classTeacherData || []) as ClassTeacherRelation[])
+          .map((relation) => relation.classes)
+          .filter(Boolean)
+          .filter((classItem) => classItem.status !== "archived") as ClassItem[];
 
-  const goalProgressMap = new Map<string, number>();
+        if (classRows.length === 0) {
+          setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
+          setIsLoading(false);
+          return;
+        }
 
-  records.forEach((record) => {
-    if (!record.goal_id) return;
+        if (classRows.length > 1) {
+          setMessage(
+            "检测到这个小老师绑定了多个班级。第一版系统要求一个小老师只对应一个班级，请先在管理员端检查分班数据。"
+          );
+          setIsLoading(false);
+          return;
+        }
 
-    const currentCount = goalProgressMap.get(record.goal_id) || 0;
-    goalProgressMap.set(record.goal_id, currentCount + 1);
-  });
+        const currentClass = classRows[0];
+        setTeacherClass(currentClass);
 
-  const goalsWithProgress: GoalWithProgress[] = goals.map((goal) => ({
-    ...goal,
-    completed_lessons: goalProgressMap.get(goal.id) || 0,
-  }));
+        const { data: goalsFromSupabase, error: goalsError } = await supabase
+          .from("teaching_goals")
+          .select(
+            "id, class_id, title, description, start_date, expected_lessons, status, created_at, completed_at"
+          )
+          .eq("teacher_id", parsedSession.teacherId)
+          .eq("class_id", currentClass.id)
+          .order("created_at", { ascending: false });
+
+        if (goalsError) {
+          setMessage(`读取教学目标失败：${goalsError.message}`);
+          setIsLoading(false);
+          return;
+        }
+
+        const { data: recordsFromSupabase, error: recordsError } =
+          await supabase
+            .from("lesson_records")
+            .select(
+              "id, goal_id, class_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, teacher_reflection, created_at"
+            )
+            .eq("teacher_id", parsedSession.teacherId)
+            .eq("class_id", currentClass.id)
+            .order("lesson_date", { ascending: false })
+            .order("created_at", { ascending: false });
+
+        if (recordsError) {
+          setMessage(`读取授课记录失败：${recordsError.message}`);
+          setIsLoading(false);
+          return;
+        }
+
+        const lessonRecords = (recordsFromSupabase || []) as LessonRecord[];
+        const lessonRecordIds = lessonRecords.map((record) => record.id);
+
+        let commentsFromSupabase: StudentLessonComment[] = [];
+
+        if (lessonRecordIds.length > 0) {
+          const { data: commentsData, error: commentsError } = await supabase
+            .from("student_lesson_comments")
+            .select("id, lesson_record_id, student_name, comment")
+            .in("lesson_record_id", lessonRecordIds);
+
+          if (commentsError) {
+            setMessage(`读取学生留言失败：${commentsError.message}`);
+            setIsLoading(false);
+            return;
+          }
+
+          commentsFromSupabase = (commentsData || []) as StudentLessonComment[];
+        }
+
+        setGoals((goalsFromSupabase || []) as TeachingGoal[]);
+        setRecords(lessonRecords);
+        setComments(commentsFromSupabase);
+        setIsLoading(false);
+      } catch {
+        localStorage.removeItem("orp_teacher_session");
+        setIsLoading(false);
+      }
+    }
+
+    initPage();
+  }, []);
+
+  const commentsByLesson = useMemo(() => {
+    const map = new Map<string, StudentLessonComment[]>();
+
+    comments.forEach((comment) => {
+      const existingComments = map.get(comment.lesson_record_id) || [];
+
+      map.set(comment.lesson_record_id, [...existingComments, comment]);
+    });
+
+    return map;
+  }, [comments]);
+
+  const goalMap = useMemo(() => {
+    const map = new Map<string, TeachingGoal>();
+
+    goals.forEach((goal) => {
+      map.set(goal.id, goal);
+    });
+
+    return map;
+  }, [goals]);
+
+  const goalsWithProgress = useMemo(() => {
+    const goalProgressMap = new Map<string, number>();
+
+    records.forEach((record) => {
+      if (!record.goal_id) return;
+
+      const currentCount = goalProgressMap.get(record.goal_id) || 0;
+      goalProgressMap.set(record.goal_id, currentCount + 1);
+    });
+
+    const result: GoalWithProgress[] = goals.map((goal) => ({
+      ...goal,
+      completed_lessons: goalProgressMap.get(goal.id) || 0,
+    }));
+
+    return result;
+  }, [goals, records]);
+
+  if (isLoading) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+        <section className="mx-auto max-w-6xl">
+          <Link
+            href="/teacher"
+            className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+          >
+            ← 返回小老师主页
+          </Link>
+
+          <div className="mt-8 rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm">
+            <p className="text-sm text-stone-600">
+              正在读取目标与授课记录...
+            </p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (!teacherSession) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+        <section className="mx-auto max-w-6xl">
+          <Link
+            href="/teacher"
+            className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+          >
+            ← 返回小老师主页
+          </Link>
+
+          <div className="mt-8 rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm">
+            <h1 className="text-3xl font-bold text-emerald-950">
+              请先选择小老师身份
+            </h1>
+
+            <p className="mt-3 leading-7 text-stone-600">
+              现在是测试阶段。你需要先回到小老师主页，从下拉框选择一个小老师身份，然后再查看全部目标与授课记录。
+            </p>
+
+            <Link
+              href="/teacher"
+              className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
+            >
+              去选择小老师身份
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
@@ -112,21 +309,35 @@ export default async function TeacherGoalsPage() {
         </Link>
 
         <div className="mt-8">
-          <h1 className="text-4xl font-bold text-emerald-950">
+          <p className="text-sm font-semibold text-[#2f5d50]">
+            当前小老师：{teacherSession.teacherName}
+          </p>
+
+          <h1 className="mt-2 text-4xl font-bold text-emerald-950">
             全部目标与授课记录
           </h1>
 
           <p className="mt-4 max-w-3xl leading-8 text-stone-600">
-            这里保存你创建过的所有教学目标，以及所有已经提交的授课记录。目标用于整理长期计划，授课记录则按照时间顺序排列，方便回顾每一次真实发生的课程。
+            这里保存你创建过的所有教学目标，以及所有已经提交的授课记录。当前班级：
+            <span className="font-semibold text-emerald-800">
+              {teacherClass?.name || "未读取到班级"}
+            </span>
+            。
           </p>
         </div>
+
+        {message && (
+          <div className="mt-6 rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-800">
+            {message}
+          </div>
+        )}
 
         <section className="mt-8 rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-7">
           <div>
             <h2 className="text-2xl font-bold text-emerald-950">全部目标</h2>
 
             <p className="mt-2 leading-7 text-stone-600">
-              这里列出所有教学目标。进度按照该目标下已经提交的授课记录数量计算。
+              这里列出当前小老师在当前班级下的所有教学目标。进度按照该目标下已经提交的授课记录数量计算。
             </p>
           </div>
 
@@ -262,8 +473,7 @@ export default async function TeacherGoalsPage() {
                     ? goalMap.get(record.goal_id)
                     : null;
 
-                  const lessonComments =
-                    commentsByLesson.get(record.id) || [];
+                  const lessonComments = commentsByLesson.get(record.id) || [];
 
                   return (
                     <article
@@ -343,7 +553,7 @@ export default async function TeacherGoalsPage() {
                               <p className="text-sm font-semibold text-stone-500">
                                 课程内容与课堂反馈
                               </p>
-                              <p className="mt-2 leading-8 text-stone-700">
+                              <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
                                 {record.lesson_content_and_feedback}
                               </p>
                             </div>
@@ -353,7 +563,7 @@ export default async function TeacherGoalsPage() {
                                 <p className="text-sm font-semibold text-stone-500">
                                   课后作业
                                 </p>
-                                <p className="mt-2 leading-8 text-stone-700">
+                                <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
                                   {record.homework}
                                 </p>
                               </div>
@@ -364,7 +574,7 @@ export default async function TeacherGoalsPage() {
                                 <p className="text-sm font-semibold text-stone-500">
                                   下节课计划
                                 </p>
-                                <p className="mt-2 leading-8 text-stone-700">
+                                <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
                                   {record.next_plan}
                                 </p>
                               </div>
@@ -375,9 +585,14 @@ export default async function TeacherGoalsPage() {
                                 <p className="text-sm font-semibold text-stone-500">
                                   材料链接
                                 </p>
-                                <p className="mt-2 break-all leading-8 text-stone-700">
-                                  {record.material_link}
-                                </p>
+                                <a
+                                  href={record.material_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-2 inline-block break-all text-sm font-semibold text-emerald-700 underline"
+                                >
+                                  打开材料链接
+                                </a>
                               </div>
                             )}
 
@@ -386,7 +601,7 @@ export default async function TeacherGoalsPage() {
                                 <p className="text-sm font-semibold text-emerald-700">
                                   小老师反思
                                 </p>
-                                <p className="mt-2 leading-8 text-stone-700">
+                                <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
                                   {record.teacher_reflection}
                                 </p>
                               </div>

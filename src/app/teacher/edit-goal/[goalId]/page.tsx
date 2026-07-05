@@ -5,8 +5,28 @@ import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
+type TeacherSession = {
+  teacherId: string;
+  teacherName: string;
+  loggedInAt: string;
+};
+
+type ClassItem = {
+  id: string;
+  name: string;
+  school: string | null;
+  status: string;
+};
+
+type ClassTeacherRelation = {
+  class_id: string;
+  classes: any;
+};
+
 type TeachingGoal = {
   id: string;
+  teacher_id: string;
+  class_id: string | null;
   title: string;
   description: string | null;
   start_date: string | null;
@@ -19,50 +39,143 @@ export default function EditGoalPage() {
   const params = useParams<{ goalId: string }>();
   const goalId = params.goalId;
 
+  const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(
+    null
+  );
+  const [teacherClass, setTeacherClass] = useState<ClassItem | null>(null);
   const [goal, setGoal] = useState<TeachingGoal | null>(null);
   const [completedLessons, setCompletedLessons] = useState(0);
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    async function loadGoal() {
+    async function initPage() {
       setIsLoading(true);
       setMessage("");
 
-      const { data: goalData, error: goalError } = await supabase
-        .from("teaching_goals")
-        .select("id, title, description, start_date, expected_lessons, status")
-        .eq("id", goalId)
-        .single();
+      const storedSession = localStorage.getItem("orp_teacher_session");
 
-      if (goalError || !goalData) {
-        setMessage("目标读取失败，可能是目标不存在。");
+      if (!storedSession) {
         setIsLoading(false);
         return;
       }
 
-      const { count, error: countError } = await supabase
-        .from("lesson_records")
-        .select("id", { count: "exact", head: true })
-        .eq("goal_id", goalId);
+      try {
+        const parsedSession = JSON.parse(storedSession) as TeacherSession;
 
-      if (countError) {
-        setMessage("目标进度读取失败。");
+        if (!parsedSession.teacherId) {
+          localStorage.removeItem("orp_teacher_session");
+          setIsLoading(false);
+          return;
+        }
+
+        setTeacherSession(parsedSession);
+
+        const { data: classTeacherData, error: classTeacherError } =
+          await supabase
+            .from("class_teachers")
+            .select(
+              `
+              class_id,
+              classes (
+                id,
+                name,
+                school,
+                status
+              )
+            `
+            )
+            .eq("teacher_id", parsedSession.teacherId);
+
+        if (classTeacherError) {
+          setMessage(`读取小老师班级失败：${classTeacherError.message}`);
+          setIsLoading(false);
+          return;
+        }
+
+        const classRows = ((classTeacherData || []) as ClassTeacherRelation[])
+          .map((relation) => relation.classes)
+          .filter(Boolean)
+          .filter((classItem) => classItem.status !== "archived") as ClassItem[];
+
+        if (classRows.length === 0) {
+          setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
+          setIsLoading(false);
+          return;
+        }
+
+        if (classRows.length > 1) {
+          setMessage(
+            "检测到这个小老师绑定了多个班级。第一版系统要求一个小老师只对应一个班级，请先在管理员端检查分班数据。"
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        const currentClass = classRows[0];
+        setTeacherClass(currentClass);
+
+        const { data: goalData, error: goalError } = await supabase
+          .from("teaching_goals")
+          .select(
+            "id, teacher_id, class_id, title, description, start_date, expected_lessons, status"
+          )
+          .eq("id", goalId)
+          .eq("teacher_id", parsedSession.teacherId)
+          .eq("class_id", currentClass.id)
+          .maybeSingle();
+
+        if (goalError) {
+          setMessage(`目标读取失败：${goalError.message}`);
+          setIsLoading(false);
+          return;
+        }
+
+        if (!goalData) {
+          setMessage("目标不存在，或者这个目标不属于当前小老师。");
+          setIsLoading(false);
+          return;
+        }
+
+        const { count, error: countError } = await supabase
+          .from("lesson_records")
+          .select("id", { count: "exact", head: true })
+          .eq("goal_id", goalId)
+          .eq("teacher_id", parsedSession.teacherId)
+          .eq("class_id", currentClass.id);
+
+        if (countError) {
+          setMessage(`目标进度读取失败：${countError.message}`);
+          setIsLoading(false);
+          return;
+        }
+
+        setGoal(goalData as TeachingGoal);
+        setCompletedLessons(count || 0);
         setIsLoading(false);
-        return;
+      } catch {
+        localStorage.removeItem("orp_teacher_session");
+        setIsLoading(false);
       }
-
-      setGoal(goalData as TeachingGoal);
-      setCompletedLessons(count || 0);
-      setIsLoading(false);
     }
 
-    loadGoal();
+    initPage();
   }, [goalId]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!teacherSession) {
+      setMessage("请先回到小老师主页，选择小老师身份。");
+      return;
+    }
+
+    if (!teacherClass) {
+      setMessage("没有读取到当前小老师对应的班级，暂时不能修改目标。");
+      return;
+    }
 
     if (!goal) return;
 
@@ -78,7 +191,6 @@ export default function EditGoalPage() {
 
     const title = String(formData.get("title") || "").trim();
     const description = String(formData.get("description") || "").trim();
-    const startDate = String(formData.get("start_date") || "").trim();
     const expectedLessonsText = String(
       formData.get("expected_lessons") || ""
     ).trim();
@@ -112,10 +224,11 @@ export default function EditGoalPage() {
       .update({
         title,
         description: description || null,
-        start_date: startDate || null,
         expected_lessons: expectedLessons,
       })
       .eq("id", goalId)
+      .eq("teacher_id", teacherSession.teacherId)
+      .eq("class_id", teacherClass.id)
       .neq("status", "completed");
 
     if (error) {
@@ -124,7 +237,7 @@ export default function EditGoalPage() {
       return;
     }
 
-    setMessage("修改成功，正在返回全部目标与授课记录...");
+    setMessage("修改成功，正在返回小老师主页...");
     setIsSubmitting(false);
 
     router.push("/teacher");
@@ -148,6 +261,38 @@ export default function EditGoalPage() {
     );
   }
 
+  if (!teacherSession) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+        <section className="mx-auto max-w-3xl">
+          <Link
+            href="/teacher"
+            className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+          >
+            ← 返回首页
+          </Link>
+
+          <div className="mt-8 rounded-3xl bg-white p-8 shadow-sm">
+            <h1 className="text-3xl font-bold text-emerald-950">
+              请先选择小老师身份
+            </h1>
+
+            <p className="mt-3 leading-7 text-stone-600">
+              现在是测试阶段。你需要先回到小老师主页，从下拉框选择一个小老师身份，然后再修改教学目标。
+            </p>
+
+            <Link
+              href="/teacher"
+              className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
+            >
+              去选择小老师身份
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   if (!goal) {
     return (
       <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
@@ -161,7 +306,7 @@ export default function EditGoalPage() {
 
           <div className="mt-8 rounded-3xl bg-white p-8 shadow-sm">
             <p className="leading-7 text-stone-600">
-              {message || "目标不存在。"}
+              {message || "目标不存在，或者这个目标不属于当前小老师。"}
             </p>
           </div>
         </section>
@@ -191,14 +336,24 @@ export default function EditGoalPage() {
           </h1>
 
           <p className="mt-4 leading-8 text-stone-600">
-            目标是教学计划，可以根据实际进度调整。已经关联到这个目标的授课记录不会被改变。
+            当前小老师：
+            <span className="font-semibold text-emerald-800">
+              {teacherSession.teacherName}
+            </span>
+            。目标是教学计划，可以根据实际进度调整。已经关联到这个目标的授课记录不会被改变。
           </p>
 
           <div className="mt-6 rounded-2xl bg-[#f6f5e9] p-5">
-            <p className="text-sm text-stone-500">当前已完成课次</p>
+            <p className="text-sm text-stone-500">所属班级</p>
+            <p className="mt-1 text-xl font-bold text-emerald-950">
+              {teacherClass?.name || "未读取到班级"}
+            </p>
+
+            <p className="mt-4 text-sm text-stone-500">当前已完成课次</p>
             <p className="mt-1 text-2xl font-bold text-emerald-950">
               {completedLessons} 节
             </p>
+
             <p className="mt-2 text-sm leading-6 text-stone-500">
               修改后的计划课次不能少于这个数字。
             </p>
@@ -237,7 +392,7 @@ export default function EditGoalPage() {
                   name="description"
                   rows={5}
                   defaultValue={goal.description || ""}
-                  className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                  className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
                 />
               </div>
 
@@ -248,11 +403,15 @@ export default function EditGoalPage() {
                   </label>
 
                   <input
-                    type="date"
-                    name="start_date"
-                    defaultValue={goal.start_date || ""}
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                    type="text"
+                    value={goal.start_date || "未设置"}
+                    readOnly
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-stone-100 px-4 py-3 text-stone-500 outline-none"
                   />
+
+                  <p className="mt-2 text-sm text-stone-500">
+                    开始日期是目标创建时的记录，不能在这里修改。
+                  </p>
                 </div>
 
                 <div>
