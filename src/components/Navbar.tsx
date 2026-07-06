@@ -17,8 +17,8 @@ export default function Navbar() {
         <Link href="/join">加入我们</Link>
         <Link href="/donation">资助我们</Link>
       </nav>
-
-      <StudentAccountMenu />
+      
+      <Link href="/login">登录</Link>
 
     </header>
   );

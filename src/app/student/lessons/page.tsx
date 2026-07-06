@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getCurrentStudent, logoutCurrentUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
 
 type StudentSession = {
   studentId: string;
   studentName: string;
-  classId: string;
-  className: string;
+  username: string | null;
   loggedInAt: string;
 };
 
@@ -17,6 +17,10 @@ type StudentRow = {
   id: string;
   name: string;
   status: string;
+};
+
+type ClassRelation = {
+  class_id: string;
 };
 
 type LessonRecord = {
@@ -91,37 +95,42 @@ export default function StudentLessonsPage() {
 
     const studentData = studentFromSupabase as StudentRow;
 
-    if (studentData.status === "withdrawn" || studentData.status === "archived") {
+    if (
+      studentData.status === "withdrawn" ||
+      studentData.status === "archived"
+    ) {
       setMessage("这个学生账号当前不可用。如有疑问，请联系 ORP 管理员。");
       setIsLoading(false);
       return;
     }
 
-    const { data: relationData, error: relationError } = await supabase
+    const { data: relationFromSupabase, error: relationError } = await supabase
       .from("class_students")
-      .select("id")
-      .eq("student_id", activeSession.studentId)
-      .eq("class_id", activeSession.classId)
-      .maybeSingle();
+      .select("class_id")
+      .eq("student_id", activeSession.studentId);
 
     if (relationError) {
-      setMessage(`验证班级关系失败：${relationError.message}`);
+      setMessage(`读取班级关系失败：${relationError.message}`);
       setIsLoading(false);
       return;
     }
 
-    if (!relationData) {
-      setMessage("这个学生不属于当前班级，请重新登录。");
+    const relation = ((relationFromSupabase || []) as ClassRelation[])[0];
+
+    if (!relation) {
+      setMessage("没有找到你的班级信息，请联系 ORP 管理员。");
       setIsLoading(false);
       return;
     }
+
+    const activeClassId = relation.class_id;
 
     const { data: recordsFromSupabase, error: recordsError } = await supabase
       .from("lesson_records")
       .select(
         "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, created_at"
       )
-      .eq("class_id", activeSession.classId)
+      .eq("class_id", activeClassId)
       .order("lesson_date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -163,28 +172,33 @@ export default function StudentLessonsPage() {
   }
 
   useEffect(() => {
-    const storedSession = localStorage.getItem("orp_student_session");
+    async function loadCurrentStudent() {
+      setIsLoading(true);
+      setMessage("");
 
-    if (!storedSession) {
-      setIsLoading(false);
-      return;
-    }
+      const currentStudent = await getCurrentStudent();
 
-    try {
-      const parsedSession = JSON.parse(storedSession) as StudentSession;
-
-      if (!parsedSession.studentId || !parsedSession.classId) {
+      if (!currentStudent) {
         localStorage.removeItem("orp_student_session");
+        setSession(null);
         setIsLoading(false);
         return;
       }
 
-      setSession(parsedSession);
-      fetchLessons(parsedSession);
-    } catch {
-      localStorage.removeItem("orp_student_session");
-      setIsLoading(false);
+      const activeSession: StudentSession = {
+        studentId: currentStudent.id,
+        studentName: currentStudent.name,
+        username: currentStudent.username,
+        loggedInAt: new Date().toISOString(),
+      };
+
+      localStorage.setItem("orp_student_session", JSON.stringify(activeSession));
+
+      setSession(activeSession);
+      await fetchLessons(activeSession);
     }
+
+    loadCurrentStudent();
   }, []);
 
   const attendanceByLessonId = useMemo(() => {
@@ -208,9 +222,9 @@ export default function StudentLessonsPage() {
     return map;
   }, [comments]);
 
-  function handleLogout() {
-    localStorage.removeItem("orp_student_session");
-    router.push("/student-login");
+  async function handleLogout() {
+    await logoutCurrentUser();
+    router.push("/login");
   }
 
   async function submitComment(lessonId: string) {
@@ -268,18 +282,18 @@ export default function StudentLessonsPage() {
           </p>
 
           <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-            请先登录学生端
+            请先登录
           </h1>
 
           <p className="mt-3 text-sm leading-7 text-stone-600">
-            登录后才能查看自己的全部课程记录。
+            学生请使用用户名和密码登录后查看自己的课程记录。
           </p>
 
           <Link
-            href="/student-login"
+            href="/login"
             className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
           >
-            前往学生登录
+            前往登录
           </Link>
         </section>
       </main>
@@ -480,7 +494,9 @@ export default function StudentLessonsPage() {
 
                         <textarea
                           value={commentText}
-                          onChange={(event) => setCommentText(event.target.value)}
+                          onChange={(event) =>
+                            setCommentText(event.target.value)
+                          }
                           rows={4}
                           placeholder="比如：今天我最喜欢的是…… / 我还有点不明白的是……"
                           className="mt-3 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm leading-7 outline-none focus:border-emerald-500"

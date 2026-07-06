@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { getCurrentStudent } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
 
 type StudentSession = {
   studentId: string;
   studentName: string;
-  classId: string;
-  className: string;
+  username: string | null;
   loggedInAt: string;
 };
 
@@ -18,8 +17,6 @@ type StudentRow = {
   name: string;
   note: string | null;
   status: string;
-  student_code: string | null;
-  pin_code: string | null;
 };
 
 type ClassRelation = {
@@ -62,11 +59,11 @@ type StudentLessonComment = {
 };
 
 export default function StudentPage() {
-  const router = useRouter();
-
   const [session, setSession] = useState<StudentSession | null>(null);
   const [student, setStudent] = useState<StudentRow | null>(null);
-  const [classRelation, setClassRelation] = useState<ClassRelation | null>(null);
+  const [classRelation, setClassRelation] = useState<ClassRelation | null>(
+    null
+  );
   const [classmates, setClassmates] = useState<StudentRow[]>([]);
   const [goals, setGoals] = useState<TeachingGoal[]>([]);
   const [records, setRecords] = useState<LessonRecord[]>([]);
@@ -83,7 +80,7 @@ export default function StudentPage() {
 
     const { data: studentFromSupabase, error: studentError } = await supabase
       .from("students")
-      .select("id, name, note, status, student_code, pin_code")
+      .select("id, name, note, status")
       .eq("id", activeSession.studentId)
       .maybeSingle();
 
@@ -101,7 +98,10 @@ export default function StudentPage() {
 
     const studentData = studentFromSupabase as StudentRow;
 
-    if (studentData.status === "withdrawn" || studentData.status === "archived") {
+    if (
+      studentData.status === "withdrawn" ||
+      studentData.status === "archived"
+    ) {
       setMessage("这个学生账号当前不可用。如有疑问，请联系 ORP 管理员。");
       setIsLoading(false);
       return;
@@ -134,8 +134,7 @@ export default function StudentPage() {
           )
         `
         )
-        .eq("student_id", activeSession.studentId)
-        .eq("class_id", activeSession.classId);
+        .eq("student_id", activeSession.studentId);
 
     if (classRelationError) {
       setMessage(`读取班级信息失败：${classRelationError.message}`);
@@ -144,6 +143,14 @@ export default function StudentPage() {
     }
 
     const relation = ((classRelationsFromSupabase || []) as ClassRelation[])[0];
+
+    if (!relation) {
+      setMessage("没有找到你的班级信息，请联系 ORP 管理员。");
+      setIsLoading(false);
+      return;
+    }
+
+    const activeClassId = relation.class_id;
 
     const { data: classmatesFromSupabase, error: classmatesError } =
       await supabase
@@ -155,13 +162,11 @@ export default function StudentPage() {
             id,
             name,
             note,
-            status,
-            student_code,
-            pin_code
+            status
           )
         `
         )
-        .eq("class_id", activeSession.classId);
+        .eq("class_id", activeClassId);
 
     if (classmatesError) {
       setMessage(`读取同学信息失败：${classmatesError.message}`);
@@ -179,7 +184,7 @@ export default function StudentPage() {
     const { data: goalsFromSupabase, error: goalsError } = await supabase
       .from("teaching_goals")
       .select("id, title, description, expected_lessons, status")
-      .eq("class_id", activeSession.classId)
+      .eq("class_id", activeClassId)
       .eq("status", "active")
       .order("created_at", { ascending: false });
 
@@ -194,7 +199,7 @@ export default function StudentPage() {
       .select(
         "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, created_at"
       )
-      .eq("class_id", activeSession.classId)
+      .eq("class_id", activeClassId)
       .order("lesson_date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -210,12 +215,13 @@ export default function StudentPage() {
     let commentsForLatestRecord: StudentLessonComment[] = [];
 
     if (latestRecord) {
-      const { data: commentsFromSupabase, error: commentsError } = await supabase
-        .from("student_lesson_comments")
-        .select("id, lesson_record_id, student_name, comment, created_at")
-        .eq("student_id", activeSession.studentId)
-        .eq("lesson_record_id", latestRecord.id)
-        .order("created_at", { ascending: false });
+      const { data: commentsFromSupabase, error: commentsError } =
+        await supabase
+          .from("student_lesson_comments")
+          .select("id, lesson_record_id, student_name, comment, created_at")
+          .eq("student_id", activeSession.studentId)
+          .eq("lesson_record_id", latestRecord.id)
+          .order("created_at", { ascending: false });
 
       if (commentsError) {
         setMessage(`读取留言失败：${commentsError.message}`);
@@ -228,7 +234,7 @@ export default function StudentPage() {
     }
 
     setStudent(studentData);
-    setClassRelation(relation || null);
+    setClassRelation(relation);
     setClassmates(classmateRows);
     setGoals((goalsFromSupabase || []) as TeachingGoal[]);
     setRecords(lessonRecords);
@@ -237,30 +243,34 @@ export default function StudentPage() {
   }
 
   useEffect(() => {
-    const storedSession = localStorage.getItem("orp_student_session");
+    async function loadCurrentStudent() {
+      setIsLoading(true);
+      setMessage("");
 
-    if (!storedSession) {
-      setIsLoading(false);
-      return;
-    }
+      const currentStudent = await getCurrentStudent();
 
-    try {
-      const parsedSession = JSON.parse(storedSession) as StudentSession;
-
-      if (!parsedSession.studentId || !parsedSession.classId) {
+      if (!currentStudent) {
         localStorage.removeItem("orp_student_session");
+        setSession(null);
         setIsLoading(false);
         return;
       }
 
-      setSession(parsedSession);
-      fetchStudentData(parsedSession);
-    } catch {
-      localStorage.removeItem("orp_student_session");
-      setIsLoading(false);
-    }
-  }, []);
+      const activeSession: StudentSession = {
+        studentId: currentStudent.id,
+        studentName: currentStudent.name,
+        username: currentStudent.username,
+        loggedInAt: new Date().toISOString(),
+      };
 
+      localStorage.setItem("orp_student_session", JSON.stringify(activeSession));
+
+      setSession(activeSession);
+      await fetchStudentData(activeSession);
+    }
+
+    loadCurrentStudent();
+  }, []);
 
   const currentGoal = goals[0];
   const latestRecord = records[0];
@@ -285,8 +295,7 @@ export default function StudentPage() {
 
   const studentInfo = {
     name: student?.name || session?.studentName || "学生",
-    className:
-      classRelation?.classes?.name || session?.className || "暂未读取班级",
+    className: classRelation?.classes?.name || "暂未读取班级",
     classmateName:
       classmateNames.length > 0 ? classmateNames.join("、") : "暂无其他同学",
     teacherName: teacherNames.length > 0 ? teacherNames.join("、") : "暂无小老师",
@@ -311,18 +320,18 @@ export default function StudentPage() {
           </p>
 
           <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-            请先登录学生端
+            请先登录
           </h1>
 
           <p className="mt-3 text-sm leading-7 text-stone-600">
-            你需要使用班级码、学生码和 PIN 登录后，才能查看自己的学习记录。
+            学生请使用用户名和密码登录后查看自己的学习记录。
           </p>
 
           <Link
-            href="/student-login"
+            href="/login"
             className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
           >
-            前往学生登录
+            前往登录
           </Link>
         </section>
       </main>
@@ -461,7 +470,8 @@ export default function StudentPage() {
           {latestRecord ? (
             <article className="mt-5 rounded-2xl bg-[#fffdf4] p-5">
               <p className="text-sm text-stone-500">
-                {latestRecord.lesson_date} · {latestRecord.duration_minutes} 分钟
+                {latestRecord.lesson_date} · {latestRecord.duration_minutes}{" "}
+                分钟
               </p>
 
               <h3 className="mt-2 text-2xl font-bold text-emerald-950">

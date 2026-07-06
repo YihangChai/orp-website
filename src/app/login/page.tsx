@@ -1,52 +1,122 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { FormEvent, useState } from "react";
+import { loginWithAccountAndPassword } from "@/lib/auth";
 
 export default function LoginPage() {
+  const router = useRouter();
+
+  const [account, setAccount] = useState("");
+  const [password, setPassword] = useState("");
+
+  const [message, setMessage] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setMessage("");
+    setIsLoggingIn(true);
+
+    const result = await loginWithAccountAndPassword(account, password);
+
+    setIsLoggingIn(false);
+
+    if (result.role === "none") {
+      setMessage(result.message);
+      return;
+    }
+
+    router.push(result.redirectTo);
+  }
+
   return (
-    <main className="min-h-[calc(100vh-4rem)] bg-[#f6f5e9] px-6 py-20 text-stone-800">
-      {/* 
-        临时登录页面：
-        现在还没有接入正式登录系统。
-        后续需要在这里接入 Supabase Auth，并根据用户角色跳转：
-        teacher → /teacher
-        student → /student
-        admin → /admin
-      */}
+    <main className="min-h-screen bg-[#f6f5e9] px-6 py-12 text-stone-800">
+      <section className="mx-auto max-w-md">
+        <Link
+          href="/"
+          className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+        >
+          ← 返回首页
+        </Link>
 
-      <section className="mx-auto max-w-3xl rounded-[2rem] border border-emerald-100 bg-white/85 p-8 text-center shadow-sm md:p-12">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
-          ORP System
-        </p>
+        <section className="mt-8 rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-8">
+          <div>
+            <p className="text-sm font-semibold text-[#2f5d50]">
+              ORP 管理与教学系统
+            </p>
 
-        <h1 className="mt-4 text-4xl font-bold text-emerald-950">
-          登录系统开发中
-        </h1>
+            <h1 className="mt-3 text-3xl font-bold text-emerald-950">
+              登录
+            </h1>
 
-        <p className="mt-5 leading-8 text-stone-600">
-          这里之后会接入正式账号登录和角色权限。现在先用临时入口模拟不同身份进入对应页面。
-        </p>
+            <p className="mt-3 text-sm leading-7 text-stone-600">
+              管理员和小老师请输入邮箱，学生请输入用户名。系统会自动识别身份并进入对应页面。
+            </p>
+          </div>
 
-        <div className="mt-10 grid gap-4 md:grid-cols-3">
-          <Link
-            href="/teacher"
-            className="rounded-2xl border border-emerald-100 bg-[#f6f5e9] px-5 py-6 font-semibold text-emerald-900 hover:bg-emerald-50"
-          >
-            小老师入口
-          </Link>
+          <form onSubmit={handleLogin} className="mt-6 space-y-5">
+            <div>
+              <label className="text-sm font-semibold text-stone-700">
+                账号
+              </label>
 
-          <Link
-            href="/student"
-            className="rounded-2xl border border-emerald-100 bg-[#f6f5e9] px-5 py-6 font-semibold text-emerald-900 hover:bg-emerald-50"
-          >
-            学生入口
-          </Link>
+              <input
+                type="text"
+                value={account}
+                onChange={(event) => {
+                  setAccount(event.target.value);
+                  setMessage("");
+                }}
+                placeholder="老师/管理员输入邮箱；学生输入用户名"
+                className="mt-2 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:bg-white"
+              />
+            </div>
 
-          <Link
-            href="/admin"
-            className="rounded-2xl border border-emerald-100 bg-[#f6f5e9] px-5 py-6 font-semibold text-emerald-900 hover:bg-emerald-50"
-          >
-            管理员入口
-          </Link>
-        </div>
+            <div>
+              <label className="text-sm font-semibold text-stone-700">
+                密码
+              </label>
+
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setMessage("");
+                }}
+                placeholder="请输入密码"
+                className="mt-2 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:bg-white"
+              />
+            </div>
+
+            {message && (
+              <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold leading-7 text-amber-800">
+                {message}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full rounded-full bg-[#2f5d50] px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isLoggingIn ? "正在登录..." : "登录"}
+            </button>
+          </form>
+
+          <div className="mt-6 rounded-2xl bg-[#fffdf4] p-4">
+            <p className="text-sm font-semibold text-emerald-900">
+              登录说明
+            </p>
+
+            <p className="mt-2 text-sm leading-7 text-stone-600">
+              管理员和小老师使用邮箱登录，例如 teacher@example.com。学生使用用户名登录，例如 student001。
+            </p>
+          </div>
+        </section>
       </section>
     </main>
   );
