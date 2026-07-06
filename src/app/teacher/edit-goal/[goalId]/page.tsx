@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { getCurrentTeacher } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
 
 type TeacherSession = {
   teacherId: string;
   teacherName: string;
+  email: string | null;
   loggedInAt: string;
 };
 
@@ -20,7 +22,7 @@ type ClassItem = {
 
 type ClassTeacherRelation = {
   class_id: string;
-  classes: any;
+  classes: ClassItem | ClassItem[] | null;
 };
 
 type TeachingGoal = {
@@ -50,115 +52,132 @@ export default function EditGoalPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
 
+  async function fetchTeacherClass(teacherId: string) {
+    const { data, error } = await supabase
+      .from("class_teachers")
+      .select(
+        `
+        class_id,
+        classes (
+          id,
+          name,
+          school,
+          status
+        )
+      `
+      )
+      .eq("teacher_id", teacherId);
+
+    if (error) {
+      setMessage(`读取小老师班级失败：${error.message}`);
+      return null;
+    }
+
+    const relations = (data || []) as unknown as ClassTeacherRelation[];
+
+    const classRows = relations
+      .map((relation) => {
+        if (!relation.classes) return null;
+
+        return Array.isArray(relation.classes)
+          ? relation.classes[0] || null
+          : relation.classes;
+      })
+      .filter((classItem): classItem is ClassItem => classItem !== null)
+      .filter((classItem) => classItem.status !== "archived");
+
+    if (classRows.length === 0) {
+      setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
+      return null;
+    }
+
+    if (classRows.length > 1) {
+      setMessage(
+        "检测到这个小老师绑定了多个班级。当前页面会默认使用第一个班级；后续可以升级为班级下拉选择。"
+      );
+    }
+
+    return classRows[0];
+  }
+
+  async function fetchGoalAndProgress(
+    activeGoalId: string,
+    teacherId: string,
+    classId: string
+  ) {
+    const { data: goalData, error: goalError } = await supabase
+      .from("teaching_goals")
+      .select(
+        "id, teacher_id, class_id, title, description, start_date, expected_lessons, status"
+      )
+      .eq("id", activeGoalId)
+      .eq("teacher_id", teacherId)
+      .eq("class_id", classId)
+      .maybeSingle();
+
+    if (goalError) {
+      setMessage(`目标读取失败：${goalError.message}`);
+      return;
+    }
+
+    if (!goalData) {
+      setMessage("目标不存在，或者这个目标不属于当前小老师。");
+      return;
+    }
+
+    const { count, error: countError } = await supabase
+      .from("lesson_records")
+      .select("id", { count: "exact", head: true })
+      .eq("goal_id", activeGoalId)
+      .eq("teacher_id", teacherId)
+      .eq("class_id", classId);
+
+    if (countError) {
+      setMessage(`目标进度读取失败：${countError.message}`);
+      return;
+    }
+
+    setGoal(goalData as TeachingGoal);
+    setCompletedLessons(count || 0);
+  }
+
   useEffect(() => {
     async function initPage() {
       setIsLoading(true);
       setMessage("");
 
-      const storedSession = localStorage.getItem("orp_teacher_session");
+      const teacher = await getCurrentTeacher();
 
-      if (!storedSession) {
+      if (!teacher) {
+        localStorage.removeItem("orp_teacher_session");
+        setTeacherSession(null);
         setIsLoading(false);
         return;
       }
 
-      try {
-        const parsedSession = JSON.parse(storedSession) as TeacherSession;
+      const activeSession: TeacherSession = {
+        teacherId: teacher.id,
+        teacherName: teacher.name,
+        email: teacher.email,
+        loggedInAt: new Date().toISOString(),
+      };
 
-        if (!parsedSession.teacherId) {
-          localStorage.removeItem("orp_teacher_session");
-          setIsLoading(false);
-          return;
-        }
+      localStorage.setItem("orp_teacher_session", JSON.stringify(activeSession));
 
-        setTeacherSession(parsedSession);
+      setTeacherSession(activeSession);
 
-        const { data: classTeacherData, error: classTeacherError } =
-          await supabase
-            .from("class_teachers")
-            .select(
-              `
-              class_id,
-              classes (
-                id,
-                name,
-                school,
-                status
-              )
-            `
-            )
-            .eq("teacher_id", parsedSession.teacherId);
+      const currentClass = await fetchTeacherClass(teacher.id);
 
-        if (classTeacherError) {
-          setMessage(`读取小老师班级失败：${classTeacherError.message}`);
-          setIsLoading(false);
-          return;
-        }
-
-        const classRows = ((classTeacherData || []) as ClassTeacherRelation[])
-          .map((relation) => relation.classes)
-          .filter(Boolean)
-          .filter((classItem) => classItem.status !== "archived") as ClassItem[];
-
-        if (classRows.length === 0) {
-          setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
-          setIsLoading(false);
-          return;
-        }
-
-        if (classRows.length > 1) {
-          setMessage(
-            "检测到这个小老师绑定了多个班级。第一版系统要求一个小老师只对应一个班级，请先在管理员端检查分班数据。"
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        const currentClass = classRows[0];
-        setTeacherClass(currentClass);
-
-        const { data: goalData, error: goalError } = await supabase
-          .from("teaching_goals")
-          .select(
-            "id, teacher_id, class_id, title, description, start_date, expected_lessons, status"
-          )
-          .eq("id", goalId)
-          .eq("teacher_id", parsedSession.teacherId)
-          .eq("class_id", currentClass.id)
-          .maybeSingle();
-
-        if (goalError) {
-          setMessage(`目标读取失败：${goalError.message}`);
-          setIsLoading(false);
-          return;
-        }
-
-        if (!goalData) {
-          setMessage("目标不存在，或者这个目标不属于当前小老师。");
-          setIsLoading(false);
-          return;
-        }
-
-        const { count, error: countError } = await supabase
-          .from("lesson_records")
-          .select("id", { count: "exact", head: true })
-          .eq("goal_id", goalId)
-          .eq("teacher_id", parsedSession.teacherId)
-          .eq("class_id", currentClass.id);
-
-        if (countError) {
-          setMessage(`目标进度读取失败：${countError.message}`);
-          setIsLoading(false);
-          return;
-        }
-
-        setGoal(goalData as TeachingGoal);
-        setCompletedLessons(count || 0);
+      if (!currentClass) {
         setIsLoading(false);
-      } catch {
-        localStorage.removeItem("orp_teacher_session");
-        setIsLoading(false);
+        return;
       }
+
+      setTeacherClass(currentClass);
+
+      await fetchGoalAndProgress(goalId, teacher.id, currentClass.id);
+
+      setIsLoading(false);
     }
 
     initPage();
@@ -168,7 +187,7 @@ export default function EditGoalPage() {
     event.preventDefault();
 
     if (!teacherSession) {
-      setMessage("请先回到小老师主页，选择小老师身份。");
+      setMessage("请先登录小老师账号。");
       return;
     }
 
@@ -191,6 +210,7 @@ export default function EditGoalPage() {
 
     const title = String(formData.get("title") || "").trim();
     const description = String(formData.get("description") || "").trim();
+
     const expectedLessonsText = String(
       formData.get("expected_lessons") || ""
     ).trim();
@@ -266,26 +286,26 @@ export default function EditGoalPage() {
       <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
         <section className="mx-auto max-w-3xl">
           <Link
-            href="/teacher"
+            href="/login"
             className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
           >
-            ← 返回首页
+            ← 前往登录
           </Link>
 
           <div className="mt-8 rounded-3xl bg-white p-8 shadow-sm">
             <h1 className="text-3xl font-bold text-emerald-950">
-              请先选择小老师身份
+              请先登录
             </h1>
 
             <p className="mt-3 leading-7 text-stone-600">
-              现在是测试阶段。你需要先回到小老师主页，从下拉框选择一个小老师身份，然后再修改教学目标。
+              小老师需要使用邮箱和密码登录后，才能修改教学目标。
             </p>
 
             <Link
-              href="/teacher"
+              href="/login"
               className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
             >
-              去选择小老师身份
+              前往登录
             </Link>
           </div>
         </section>

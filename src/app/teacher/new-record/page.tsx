@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { getCurrentTeacher } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
 
 type TeacherSession = {
   teacherId: string;
   teacherName: string;
+  email: string | null;
   loggedInAt: string;
 };
 
@@ -27,7 +29,7 @@ type ClassItem = {
 
 type ClassTeacherRelation = {
   class_id: string;
-  classes: any;
+  classes: ClassItem | ClassItem[] | null;
 };
 
 type ClassStudentItem = {
@@ -93,7 +95,9 @@ export default function NewRecordPage() {
       .map((item: any) => item.students)
       .filter(Boolean)
       .filter((student: ClassStudentItem) => student.status !== "withdrawn")
-      .filter((student: ClassStudentItem) => student.status !== "archived") as ClassStudentItem[];
+      .filter(
+        (student: ClassStudentItem) => student.status !== "archived"
+      ) as ClassStudentItem[];
 
     setStudents(formattedStudents);
 
@@ -123,79 +127,87 @@ export default function NewRecordPage() {
     setIsLoadingClassData(false);
   }
 
+  async function fetchTeacherClasses(teacherId: string) {
+    const { data, error } = await supabase
+      .from("class_teachers")
+      .select(
+        `
+        class_id,
+        classes (
+          id,
+          name,
+          school,
+          status
+        )
+      `
+      )
+      .eq("teacher_id", teacherId);
+
+    if (error) {
+      setMessage(`读取小老师班级失败：${error.message}`);
+      return;
+    }
+
+    const relations = (data || []) as unknown as ClassTeacherRelation[];
+
+    const classRows = relations
+      .map((relation) => {
+        if (!relation.classes) return null;
+
+        return Array.isArray(relation.classes)
+          ? relation.classes[0] || null
+          : relation.classes;
+      })
+      .filter((classItem): classItem is ClassItem => classItem !== null)
+      .filter((classItem) => classItem.status !== "archived");
+
+    setClasses(classRows);
+
+    if (classRows.length === 0) {
+      setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
+      return;
+    }
+
+    if (classRows.length > 1) {
+      setMessage(
+        "检测到这个小老师绑定了多个班级。当前页面会默认使用第一个班级；后续可以升级为班级下拉选择。"
+      );
+    }
+
+    const teacherClass = classRows[0];
+
+    setSelectedClassId(teacherClass.id);
+    await fetchClassData(teacherClass.id, teacherId);
+  }
+
   useEffect(() => {
     async function initPage() {
-      const storedSession = localStorage.getItem("orp_teacher_session");
+      setIsLoading(true);
+      setMessage("");
 
-      if (!storedSession) {
+      const teacher = await getCurrentTeacher();
+
+      if (!teacher) {
+        localStorage.removeItem("orp_teacher_session");
+        setTeacherSession(null);
         setIsLoading(false);
         return;
       }
 
-      try {
-        const parsedSession = JSON.parse(storedSession) as TeacherSession;
+      const activeSession: TeacherSession = {
+        teacherId: teacher.id,
+        teacherName: teacher.name,
+        email: teacher.email,
+        loggedInAt: new Date().toISOString(),
+      };
 
-        if (!parsedSession.teacherId) {
-          localStorage.removeItem("orp_teacher_session");
-          setIsLoading(false);
-          return;
-        }
+      localStorage.setItem("orp_teacher_session", JSON.stringify(activeSession));
 
-        setTeacherSession(parsedSession);
+      setTeacherSession(activeSession);
 
-        const { data: classTeacherData, error: classTeacherError } =
-          await supabase
-            .from("class_teachers")
-            .select(
-              `
-              class_id,
-              classes (
-                id,
-                name,
-                school,
-                status
-              )
-            `
-            )
-            .eq("teacher_id", parsedSession.teacherId);
+      await fetchTeacherClasses(teacher.id);
 
-        if (classTeacherError) {
-          setMessage(`读取小老师班级失败：${classTeacherError.message}`);
-          setIsLoading(false);
-          return;
-        }
-
-        const classRows = ((classTeacherData || []) as ClassTeacherRelation[])
-          .map((relation) => relation.classes)
-          .filter(Boolean)
-          .filter((classItem) => classItem.status !== "archived") as ClassItem[];
-
-        setClasses(classRows);
-
-        if (classRows.length === 0) {
-          setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
-          setIsLoading(false);
-          return;
-        }
-
-        if (classRows.length > 1) {
-          setMessage(
-            "检测到这个小老师绑定了多个班级。第一版系统要求一个小老师只对应一个班级，请先在管理员端检查分班数据。"
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        const teacherClass = classRows[0];
-
-        setSelectedClassId(teacherClass.id);
-        await fetchClassData(teacherClass.id, parsedSession.teacherId);
-
-        setIsLoading(false);
-      } catch {
-        localStorage.removeItem("orp_teacher_session");
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
 
     initPage();
@@ -205,7 +217,7 @@ export default function NewRecordPage() {
     event.preventDefault();
 
     if (!teacherSession) {
-      setMessage("请先回到小老师主页，选择小老师身份。");
+      setMessage("请先登录小老师账号。");
       return;
     }
 
@@ -222,14 +234,16 @@ export default function NewRecordPage() {
     const lessonDate = String(formData.get("lesson_date") || "");
     const durationMinutes = Number(formData.get("duration_minutes"));
     const goalId = String(formData.get("goal_id") || "");
-    const lessonTitle = String(formData.get("lesson_title") || "");
+    const lessonTitle = String(formData.get("lesson_title") || "").trim();
     const lessonContentAndFeedback = String(
       formData.get("lesson_content_and_feedback") || ""
-    );
-    const homework = String(formData.get("homework") || "");
-    const nextPlan = String(formData.get("next_plan") || "");
-    const materialLink = String(formData.get("material_link") || "");
-    const teacherReflection = String(formData.get("teacher_reflection") || "");
+    ).trim();
+    const homework = String(formData.get("homework") || "").trim();
+    const nextPlan = String(formData.get("next_plan") || "").trim();
+    const materialLink = String(formData.get("material_link") || "").trim();
+    const teacherReflection = String(
+      formData.get("teacher_reflection") || ""
+    ).trim();
 
     if (
       !lessonDate ||
@@ -238,6 +252,12 @@ export default function NewRecordPage() {
       !lessonContentAndFeedback
     ) {
       setMessage("请填写上课日期、授课时长、本节课主题和课程内容。");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (durationMinutes <= 0) {
+      setMessage("授课时长必须大于 0。");
       setIsSubmitting(false);
       return;
     }
@@ -311,25 +331,25 @@ export default function NewRecordPage() {
       <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
         <section className="mx-auto max-w-4xl rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm">
           <Link
-            href="/teacher"
+            href="/login"
             className="text-sm font-semibold text-emerald-800 hover:text-emerald-950"
           >
-            ← 返回小老师主页
+            ← 前往登录
           </Link>
 
           <h1 className="mt-4 text-3xl font-bold text-emerald-950">
-            请先选择小老师身份
+            请先登录
           </h1>
 
           <p className="mt-3 leading-7 text-stone-600">
-            现在是测试阶段。你需要先回到小老师主页，从下拉框选择一个小老师身份，然后再添加授课记录。
+            小老师需要使用邮箱和密码登录后，才能添加授课记录。
           </p>
 
           <Link
-            href="/teacher"
+            href="/login"
             className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
           >
-            去选择小老师身份
+            前往登录
           </Link>
         </section>
       </main>
@@ -387,7 +407,7 @@ export default function NewRecordPage() {
                   />
 
                   <p className="mt-2 text-xs leading-5 text-stone-500">
-                    班级根据当前小老师身份自动填写，不能在这里手动更改。
+                    班级根据当前登录的小老师账号自动读取。当前版本按一个小老师对应一个班级处理。
                   </p>
                 </div>
 
@@ -600,7 +620,7 @@ export default function NewRecordPage() {
 
             <div className="flex flex-col gap-3 border-t border-emerald-100 pt-6 md:flex-row md:items-center md:justify-between">
               <p className="text-sm leading-6 text-stone-500">
-                当前版本会根据小老师工作台中选择的身份，自动保存真实 teacher_id、class_id 和学生出勤。
+                当前版本会根据登录的小老师账号，自动保存真实 teacher_id、class_id 和学生出勤。
               </p>
 
               <button

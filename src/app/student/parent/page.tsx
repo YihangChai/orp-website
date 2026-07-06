@@ -1,11 +1,27 @@
+"use client";
+
 import Link from "next/link";
-import { revalidatePath } from "next/cache";
+import { FormEvent, useEffect, useState } from "react";
+import { getCurrentStudent } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
 
-const DEMO_STUDENT_ID = "77777777-7777-7777-7777-777777777777";
-const DEMO_STUDENT_NAME = "学生 A";
-const DEMO_PARENT_NAME = "学生 A 家长";
-const DEMO_CLASS_ID = "22222222-2222-2222-2222-222222222222";
+type CurrentStudentSession = {
+  studentId: string;
+  studentName: string;
+  username: string | null;
+  loggedInAt: string;
+};
+
+type StudentRow = {
+  id: string;
+  name: string;
+  username: string | null;
+  status: string;
+};
+
+type ClassRelation = {
+  class_id: string;
+};
 
 type TeachingGoal = {
   id: string;
@@ -30,48 +46,185 @@ type LessonRecord = {
   created_at: string;
 };
 
-export const dynamic = "force-dynamic";
+export default function ParentModePage() {
+  const [session, setSession] = useState<CurrentStudentSession | null>(null);
+  const [student, setStudent] = useState<StudentRow | null>(null);
+  const [classId, setClassId] = useState("");
 
-export default async function ParentModePage() {
-  async function submitParentMessage(formData: FormData) {
-    "use server";
+  const [goals, setGoals] = useState<TeachingGoal[]>([]);
+  const [records, setRecords] = useState<LessonRecord[]>([]);
 
-    const parentName = String(formData.get("parent_name") || "").trim();
-    const message = String(formData.get("message") || "").trim();
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmittingMessage, setIsSubmittingMessage] = useState(false);
+  const [message, setMessage] = useState("");
 
-    if (!message) return;
+  async function fetchParentData(activeSession: CurrentStudentSession) {
+    setIsLoading(true);
+    setMessage("");
 
-    await supabase.from("parent_messages").insert({
-      student_id: DEMO_STUDENT_ID,
-      student_name: DEMO_STUDENT_NAME,
-      parent_name: parentName || DEMO_PARENT_NAME,
-      class_id: DEMO_CLASS_ID,
-      message,
-    });
+    const { data: studentFromSupabase, error: studentError } = await supabase
+      .from("students")
+      .select("id, name, username, status")
+      .eq("id", activeSession.studentId)
+      .maybeSingle();
 
-    revalidatePath("/student/parent");
+    if (studentError) {
+      setMessage(`读取学生资料失败：${studentError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!studentFromSupabase) {
+      setMessage("没有找到学生资料，请重新登录。");
+      setIsLoading(false);
+      return;
+    }
+
+    const studentData = studentFromSupabase as StudentRow;
+
+    if (
+      studentData.status === "withdrawn" ||
+      studentData.status === "archived"
+    ) {
+      setMessage("这个学生账号当前不可用。如有疑问，请联系 ORP 管理员。");
+      setIsLoading(false);
+      return;
+    }
+
+    const { data: relationFromSupabase, error: relationError } = await supabase
+      .from("class_students")
+      .select("class_id")
+      .eq("student_id", activeSession.studentId);
+
+    if (relationError) {
+      setMessage(`读取班级关系失败：${relationError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    const relations = (relationFromSupabase || []) as ClassRelation[];
+    const relation = relations[0];
+
+    if (!relation) {
+      setMessage("没有找到班级信息，请联系 ORP 管理员。");
+      setIsLoading(false);
+      return;
+    }
+
+    if (relations.length > 1) {
+      setMessage(
+        "系统检测到这个学生关联了多个班级。当前家长模式默认显示第一个班级。"
+      );
+    }
+
+    const activeClassId = relation.class_id;
+
+    const { data: goalsFromSupabase, error: goalsError } = await supabase
+      .from("teaching_goals")
+      .select(
+        "id, title, description, expected_lessons, status, created_at, completed_at"
+      )
+      .eq("class_id", activeClassId)
+      .order("created_at", { ascending: false });
+
+    if (goalsError) {
+      setMessage(`读取学习计划失败：${goalsError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    const { data: recordsFromSupabase, error: recordsError } = await supabase
+      .from("lesson_records")
+      .select(
+        "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, created_at"
+      )
+      .eq("class_id", activeClassId)
+      .order("lesson_date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (recordsError) {
+      setMessage(`读取课程记录失败：${recordsError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    setStudent(studentData);
+    setClassId(activeClassId);
+    setGoals((goalsFromSupabase || []) as TeachingGoal[]);
+    setRecords((recordsFromSupabase || []) as LessonRecord[]);
+    setIsLoading(false);
   }
 
-  const { data: goalsFromSupabase } = await supabase
-    .from("teaching_goals")
-    .select(
-      "id, title, description, expected_lessons, status, created_at, completed_at"
-    )
-    .eq("class_id", DEMO_CLASS_ID)
-    .order("created_at", { ascending: false });
+  useEffect(() => {
+    async function loadCurrentStudent() {
+      setIsLoading(true);
+      setMessage("");
 
-  const goals = (goalsFromSupabase || []) as TeachingGoal[];
+      const currentStudent = await getCurrentStudent();
 
-  const { data: recordsFromSupabase } = await supabase
-    .from("lesson_records")
-    .select(
-      "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, created_at"
-    )
-    .eq("class_id", DEMO_CLASS_ID)
-    .order("lesson_date", { ascending: false })
-    .order("created_at", { ascending: false });
+      if (!currentStudent) {
+        localStorage.removeItem("orp_student_session");
+        setSession(null);
+        setIsLoading(false);
+        return;
+      }
 
-  const records = (recordsFromSupabase || []) as LessonRecord[];
+      const activeSession: CurrentStudentSession = {
+        studentId: currentStudent.id,
+        studentName: currentStudent.name,
+        username: currentStudent.username,
+        loggedInAt: new Date().toISOString(),
+      };
+
+      localStorage.setItem("orp_student_session", JSON.stringify(activeSession));
+
+      setSession(activeSession);
+      await fetchParentData(activeSession);
+    }
+
+    loadCurrentStudent();
+  }, []);
+
+  async function submitParentMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!session || !student || !classId) {
+      setMessage("登录状态或班级信息无效，请重新登录后再留言。");
+      return;
+    }
+
+    setIsSubmittingMessage(true);
+    setMessage("");
+
+    const formData = new FormData(event.currentTarget);
+
+    const parentName = String(formData.get("parent_name") || "").trim();
+    const parentMessage = String(formData.get("message") || "").trim();
+
+    if (!parentMessage) {
+      setMessage("留言内容不能为空。");
+      setIsSubmittingMessage(false);
+      return;
+    }
+
+    const { error } = await supabase.from("parent_messages").insert({
+      student_id: session.studentId,
+      student_name: student.name,
+      parent_name: parentName || `${student.name} 家长`,
+      class_id: classId,
+      message: parentMessage,
+    });
+
+    if (error) {
+      setMessage(`提交留言失败：${error.message}`);
+      setIsSubmittingMessage(false);
+      return;
+    }
+
+    event.currentTarget.reset();
+    setMessage("留言已提交，感谢你的反馈。");
+    setIsSubmittingMessage(false);
+  }
 
   const activeGoals = goals.filter((goal) => goal.status === "active");
   const completedGoals = goals.filter((goal) => goal.status === "completed");
@@ -103,6 +256,41 @@ export default async function ParentModePage() {
       ? learnedGoalTitles.slice(0, 3).join("、")
       : "还没有正式记录的学习计划";
 
+  if (isLoading) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-5xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm">
+          <p className="text-sm text-stone-600">正在读取家长模式...</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-5xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#2f5d50]">ORP 家长模式</p>
+
+          <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+            请先登录
+          </h1>
+
+          <p className="mt-3 text-sm leading-7 text-stone-600">
+            请先使用学生账号登录，再进入家长模式查看学习情况。
+          </p>
+
+          <Link
+            href="/login"
+            className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
+          >
+            前往登录
+          </Link>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
       <section className="mx-auto max-w-5xl">
@@ -113,13 +301,19 @@ export default async function ParentModePage() {
           ← 返回学生首页
         </Link>
 
+        {message && (
+          <div className="mt-6 rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-800">
+            {message}
+          </div>
+        )}
+
         <section className="mt-6 rounded-[2rem] bg-[#2f5d50] px-6 py-8 text-white shadow-sm md:px-8">
           <h1 className="mt-3 text-3xl font-bold">
-            你好，{DEMO_PARENT_NAME}
+            你好，{student?.name || session.studentName} 家长
           </h1>
 
           <p className="mt-4 max-w-3xl leading-8 text-emerald-50">
-            这里可以查看 {DEMO_STUDENT_NAME} 最近的学习情况、课程记录和学习计划。
+            这里可以查看 {student?.name || session.studentName} 最近的学习情况、课程记录和学习计划。
           </p>
         </section>
 
@@ -154,7 +348,6 @@ export default async function ParentModePage() {
                   <span className="ml-1 text-lg">{remainingMinutes}分钟</span>
                 )}
               </p>
-
             </div>
 
             <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4">
@@ -322,7 +515,6 @@ export default async function ParentModePage() {
                 <h2 className="text-xl font-bold text-emerald-950">
                   全部课程记录
                 </h2>
-
               </div>
 
               <div className="w-fit rounded-full border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-800 group-open:bg-emerald-50">
@@ -407,9 +599,14 @@ export default async function ParentModePage() {
                             <p className="text-sm font-semibold text-emerald-700">
                               学习材料
                             </p>
-                            <p className="mt-2 break-all text-sm leading-7 text-stone-700">
-                              {record.material_link}
-                            </p>
+                            <a
+                              href={record.material_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-block break-all text-sm font-semibold text-emerald-700 underline"
+                            >
+                              打开学习材料
+                            </a>
                           </div>
                         )}
                       </div>
@@ -427,10 +624,10 @@ export default async function ParentModePage() {
           </h2>
 
           <p className="mt-2 text-sm leading-7 text-stone-600">
-            如果家长希望反馈孩子的学习情况、课程时间安排、上课体验或其他建议，欢迎在这里留下一句话。优秀留言可能会被发布在ORP网站首页。
+            如果家长希望反馈孩子的学习情况、课程时间安排、上课体验或其他建议，欢迎在这里留下一句话。优秀留言可能会被发布在 ORP 网站首页。
           </p>
 
-          <form action={submitParentMessage} className="mt-5 space-y-4">
+          <form onSubmit={submitParentMessage} className="mt-5 space-y-4">
             <div>
               <label className="text-sm font-semibold text-stone-700">
                 家长称呼
@@ -438,7 +635,7 @@ export default async function ParentModePage() {
 
               <input
                 name="parent_name"
-                placeholder="例如：学生 A 家长"
+                placeholder={`${student?.name || session.studentName} 家长`}
                 className="mt-2 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none focus:border-emerald-500"
               />
             </div>
@@ -458,9 +655,10 @@ export default async function ParentModePage() {
 
             <button
               type="submit"
-              className="rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
+              disabled={isSubmittingMessage}
+              className="rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              提交留言
+              {isSubmittingMessage ? "提交中..." : "提交留言"}
             </button>
           </form>
         </section>

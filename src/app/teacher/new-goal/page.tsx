@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { getCurrentTeacher } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
 
 type TeacherSession = {
   teacherId: string;
   teacherName: string;
+  email: string | null;
   loggedInAt: string;
 };
 
@@ -16,11 +18,16 @@ type ClassItem = {
   name: string;
   school: string | null;
   status: string;
+  cohorts?: {
+    id: string;
+    name: string;
+    status: string;
+  } | null;
 };
 
 type ClassTeacherRelation = {
   class_id: string;
-  classes: any;
+  classes: ClassItem | ClassItem[] | null;
 };
 
 function getTodayDate() {
@@ -35,89 +42,111 @@ export default function NewGoalPage() {
   const [teacherSession, setTeacherSession] = useState<TeacherSession | null>(
     null
   );
+
   const [teacherClass, setTeacherClass] = useState<ClassItem | null>(null);
+  const [classRelations, setClassRelations] = useState<ClassTeacherRelation[]>(
+    []
+  );
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    async function initPage() {
-      const storedSession = localStorage.getItem("orp_teacher_session");
+  async function fetchTeacherClasses(teacherId: string) {
+    const { data, error } = await supabase
+      .from("class_teachers")
+      .select(
+        `
+        class_id,
+        classes (
+          id,
+          name,
+          school,
+          status,
+          cohorts (
+            id,
+            name,
+            status
+          )
+        )
+      `
+      )
+      .eq("teacher_id", teacherId);
 
-      if (!storedSession) {
+    if (error) {
+      setMessage(`读取小老师班级失败：${error.message}`);
+      return;
+    }
+
+    const relations = (data || []) as unknown as ClassTeacherRelation[];
+
+    setClassRelations(relations);
+
+    const firstRelation = relations[0];
+
+    if (!firstRelation || !firstRelation.classes) {
+      setTeacherClass(null);
+      setMessage("没有读取到你负责的班级。请联系管理员分配班级。");
+      return;
+    }
+
+    const firstClass = Array.isArray(firstRelation.classes)
+      ? firstRelation.classes[0]
+      : firstRelation.classes;
+
+    if (!firstClass) {
+      setTeacherClass(null);
+      setMessage("没有读取到你负责的班级。请联系管理员分配班级。");
+      return;
+    }
+
+    if (firstClass.status === "archived") {
+      setTeacherClass(null);
+      setMessage("你负责的班级已归档，暂时不能创建新目标。");
+      return;
+    }
+
+    setTeacherClass(firstClass);
+  }
+
+  useEffect(() => {
+    async function loadCurrentTeacher() {
+      setIsLoading(true);
+      setMessage("");
+
+      const teacher = await getCurrentTeacher();
+
+      if (!teacher) {
+        localStorage.removeItem("orp_teacher_session");
+        setTeacherSession(null);
         setIsLoading(false);
         return;
       }
 
-      try {
-        const parsedSession = JSON.parse(storedSession) as TeacherSession;
+      const activeSession: TeacherSession = {
+        teacherId: teacher.id,
+        teacherName: teacher.name,
+        email: teacher.email,
+        loggedInAt: new Date().toISOString(),
+      };
 
-        if (!parsedSession.teacherId) {
-          localStorage.removeItem("orp_teacher_session");
-          setIsLoading(false);
-          return;
-        }
+      localStorage.setItem("orp_teacher_session", JSON.stringify(activeSession));
 
-        setTeacherSession(parsedSession);
+      setTeacherSession(activeSession);
 
-        const { data: classTeacherData, error: classTeacherError } =
-          await supabase
-            .from("class_teachers")
-            .select(
-              `
-              class_id,
-              classes (
-                id,
-                name,
-                school,
-                status
-              )
-            `
-            )
-            .eq("teacher_id", parsedSession.teacherId);
+      await fetchTeacherClasses(teacher.id);
 
-        if (classTeacherError) {
-          setMessage(`读取小老师班级失败：${classTeacherError.message}`);
-          setIsLoading(false);
-          return;
-        }
-
-        const classRows = ((classTeacherData || []) as ClassTeacherRelation[])
-          .map((relation) => relation.classes)
-          .filter(Boolean)
-          .filter((classItem) => classItem.status !== "archived") as ClassItem[];
-
-        if (classRows.length === 0) {
-          setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
-          setIsLoading(false);
-          return;
-        }
-
-        if (classRows.length > 1) {
-          setMessage(
-            "检测到这个小老师绑定了多个班级。第一版系统要求一个小老师只对应一个班级，请先在管理员端检查分班数据。"
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        setTeacherClass(classRows[0]);
-        setIsLoading(false);
-      } catch {
-        localStorage.removeItem("orp_teacher_session");
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
 
-    initPage();
+    loadCurrentTeacher();
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!teacherSession) {
-      setMessage("请先回到小老师主页，选择小老师身份。");
+      setMessage("请先登录小老师账号。");
       return;
     }
 
@@ -134,9 +163,11 @@ export default function NewGoalPage() {
     const title = String(formData.get("title") || "").trim();
     const description = String(formData.get("description") || "").trim();
     const startDate = String(formData.get("start_date") || "").trim();
+
     const expectedLessonsValue = String(
       formData.get("expected_lessons") || ""
     ).trim();
+
     const expectedLessons = expectedLessonsValue
       ? Number(expectedLessonsValue)
       : null;
@@ -191,25 +222,25 @@ export default function NewGoalPage() {
       <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
         <section className="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow-sm">
           <Link
-            href="/teacher"
+            href="/login"
             className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
           >
-            ← 返回小老师主页
+            ← 前往登录
           </Link>
 
           <h1 className="mt-4 text-3xl font-bold text-emerald-950">
-            请先选择小老师身份
+            请先登录
           </h1>
 
           <p className="mt-3 leading-7 text-stone-600">
-            现在是测试阶段。你需要先回到小老师主页，从下拉框选择一个小老师身份，然后再创建教学目标。
+            小老师需要使用邮箱和密码登录后，才能创建教学目标。
           </p>
 
           <Link
-            href="/teacher"
+            href="/login"
             className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
           >
-            去选择小老师身份
+            前往登录
           </Link>
         </section>
       </main>
@@ -258,8 +289,14 @@ export default function NewGoalPage() {
               />
 
               <p className="mt-2 text-xs leading-5 text-stone-500">
-                班级根据当前小老师身份自动填写，不能在这里手动更改。
+                班级根据当前登录的小老师账号自动读取。目前按一个小老师对应一个班级处理。
               </p>
+
+              {classRelations.length > 1 && (
+                <p className="mt-2 text-xs leading-5 text-amber-700">
+                  系统检测到你关联了多个班级。当前页面会默认使用第一个班级；后续可以升级为班级下拉选择。
+                </p>
+              )}
             </div>
 
             <div>

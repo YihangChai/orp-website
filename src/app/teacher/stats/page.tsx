@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { getCurrentTeacher } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
 
 type TeacherSession = {
   teacherId: string;
   teacherName: string;
+  email: string | null;
   loggedInAt: string;
 };
 
@@ -19,7 +21,7 @@ type ClassItem = {
 
 type ClassTeacherRelation = {
   class_id: string;
-  classes: any;
+  classes: ClassItem | ClassItem[] | null;
 };
 
 type LessonRecord = {
@@ -70,132 +72,144 @@ export default function TeacherStatsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
+  async function fetchTeacherClass(teacherId: string) {
+    const { data, error } = await supabase
+      .from("class_teachers")
+      .select(
+        `
+        class_id,
+        classes (
+          id,
+          name,
+          school,
+          status
+        )
+      `
+      )
+      .eq("teacher_id", teacherId);
+
+    if (error) {
+      setMessage(`读取小老师班级失败：${error.message}`);
+      return null;
+    }
+
+    const relations = (data || []) as unknown as ClassTeacherRelation[];
+
+    const classRows = relations
+      .map((relation) => {
+        if (!relation.classes) return null;
+
+        return Array.isArray(relation.classes)
+          ? relation.classes[0] || null
+          : relation.classes;
+      })
+      .filter((classItem): classItem is ClassItem => classItem !== null)
+      .filter((classItem) => classItem.status !== "archived");
+
+    if (classRows.length === 0) {
+      setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
+      return null;
+    }
+
+    if (classRows.length > 1) {
+      setMessage(
+        "检测到这个小老师绑定了多个班级。当前页面会默认使用第一个班级；后续可以升级为班级下拉选择。"
+      );
+    }
+
+    return classRows[0];
+  }
+
+  async function fetchTeacherStatsData(teacherId: string, classId: string) {
+    const { data: recordsFromSupabase, error: recordsError } = await supabase
+      .from("lesson_records")
+      .select(
+        "id, goal_id, class_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, teacher_reflection, created_at"
+      )
+      .eq("teacher_id", teacherId)
+      .eq("class_id", classId)
+      .order("lesson_date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (recordsError) {
+      setMessage(`读取授课记录失败：${recordsError.message}`);
+      return;
+    }
+
+    const { data: goalsFromSupabase, error: goalsError } = await supabase
+      .from("teaching_goals")
+      .select("id, title, expected_lessons, status, created_at, completed_at")
+      .eq("teacher_id", teacherId)
+      .eq("class_id", classId)
+      .order("created_at", { ascending: false });
+
+    if (goalsError) {
+      setMessage(`读取教学目标失败：${goalsError.message}`);
+      return;
+    }
+
+    const lessonRecords = (recordsFromSupabase || []) as LessonRecord[];
+    const lessonRecordIds = lessonRecords.map((record) => record.id);
+
+    let commentsFromSupabase: StudentLessonComment[] = [];
+
+    if (lessonRecordIds.length > 0) {
+      const { data: commentsData, error: commentsError } = await supabase
+        .from("student_lesson_comments")
+        .select("id, lesson_record_id, student_name, comment, created_at")
+        .in("lesson_record_id", lessonRecordIds)
+        .order("created_at", { ascending: false });
+
+      if (commentsError) {
+        setMessage(`读取学生留言失败：${commentsError.message}`);
+        return;
+      }
+
+      commentsFromSupabase = (commentsData || []) as StudentLessonComment[];
+    }
+
+    setRecords(lessonRecords);
+    setGoals((goalsFromSupabase || []) as TeachingGoal[]);
+    setComments(commentsFromSupabase);
+  }
+
   useEffect(() => {
     async function initPage() {
       setIsLoading(true);
       setMessage("");
 
-      const storedSession = localStorage.getItem("orp_teacher_session");
+      const teacher = await getCurrentTeacher();
 
-      if (!storedSession) {
+      if (!teacher) {
+        localStorage.removeItem("orp_teacher_session");
+        setTeacherSession(null);
         setIsLoading(false);
         return;
       }
 
-      try {
-        const parsedSession = JSON.parse(storedSession) as TeacherSession;
+      const activeSession: TeacherSession = {
+        teacherId: teacher.id,
+        teacherName: teacher.name,
+        email: teacher.email,
+        loggedInAt: new Date().toISOString(),
+      };
 
-        if (!parsedSession.teacherId) {
-          localStorage.removeItem("orp_teacher_session");
-          setIsLoading(false);
-          return;
-        }
+      localStorage.setItem("orp_teacher_session", JSON.stringify(activeSession));
 
-        setTeacherSession(parsedSession);
+      setTeacherSession(activeSession);
 
-        const { data: classTeacherData, error: classTeacherError } =
-          await supabase
-            .from("class_teachers")
-            .select(
-              `
-              class_id,
-              classes (
-                id,
-                name,
-                school,
-                status
-              )
-            `
-            )
-            .eq("teacher_id", parsedSession.teacherId);
+      const currentClass = await fetchTeacherClass(teacher.id);
 
-        if (classTeacherError) {
-          setMessage(`读取小老师班级失败：${classTeacherError.message}`);
-          setIsLoading(false);
-          return;
-        }
-
-        const classRows = ((classTeacherData || []) as ClassTeacherRelation[])
-          .map((relation) => relation.classes)
-          .filter(Boolean)
-          .filter((classItem) => classItem.status !== "archived") as ClassItem[];
-
-        if (classRows.length === 0) {
-          setMessage("这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。");
-          setIsLoading(false);
-          return;
-        }
-
-        if (classRows.length > 1) {
-          setMessage(
-            "检测到这个小老师绑定了多个班级。第一版系统要求一个小老师只对应一个班级，请先在管理员端检查分班数据。"
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        const currentClass = classRows[0];
-        setTeacherClass(currentClass);
-
-        const { data: recordsFromSupabase, error: recordsError } =
-          await supabase
-            .from("lesson_records")
-            .select(
-              "id, goal_id, class_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, teacher_reflection, created_at"
-            )
-            .eq("teacher_id", parsedSession.teacherId)
-            .eq("class_id", currentClass.id)
-            .order("lesson_date", { ascending: false })
-            .order("created_at", { ascending: false });
-
-        if (recordsError) {
-          setMessage(`读取授课记录失败：${recordsError.message}`);
-          setIsLoading(false);
-          return;
-        }
-
-        const { data: goalsFromSupabase, error: goalsError } = await supabase
-          .from("teaching_goals")
-          .select("id, title, expected_lessons, status, created_at, completed_at")
-          .eq("teacher_id", parsedSession.teacherId)
-          .eq("class_id", currentClass.id)
-          .order("created_at", { ascending: false });
-
-        if (goalsError) {
-          setMessage(`读取教学目标失败：${goalsError.message}`);
-          setIsLoading(false);
-          return;
-        }
-
-        const lessonRecords = (recordsFromSupabase || []) as LessonRecord[];
-        const lessonRecordIds = lessonRecords.map((record) => record.id);
-
-        let commentsFromSupabase: StudentLessonComment[] = [];
-
-        if (lessonRecordIds.length > 0) {
-          const { data: commentsData, error: commentsError } = await supabase
-            .from("student_lesson_comments")
-            .select("id, lesson_record_id, student_name, comment, created_at")
-            .in("lesson_record_id", lessonRecordIds)
-            .order("created_at", { ascending: false });
-
-          if (commentsError) {
-            setMessage(`读取学生留言失败：${commentsError.message}`);
-            setIsLoading(false);
-            return;
-          }
-
-          commentsFromSupabase = (commentsData || []) as StudentLessonComment[];
-        }
-
-        setRecords(lessonRecords);
-        setGoals((goalsFromSupabase || []) as TeachingGoal[]);
-        setComments(commentsFromSupabase);
+      if (!currentClass) {
         setIsLoading(false);
-      } catch {
-        localStorage.removeItem("orp_teacher_session");
-        setIsLoading(false);
+        return;
       }
+
+      setTeacherClass(currentClass);
+
+      await fetchTeacherStatsData(teacher.id, currentClass.id);
+
+      setIsLoading(false);
     }
 
     initPage();
@@ -316,26 +330,26 @@ export default function TeacherStatsPage() {
       <main className="min-h-screen bg-[#f6f5e9] px-6 py-8 text-stone-800">
         <section className="mx-auto max-w-6xl">
           <Link
-            href="/teacher"
+            href="/login"
             className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
           >
-            ← 返回小老师主页
+            ← 前往登录
           </Link>
 
           <div className="mt-6 rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm">
             <h1 className="text-3xl font-bold text-emerald-950">
-              请先选择小老师身份
+              请先登录
             </h1>
 
             <p className="mt-3 leading-7 text-stone-600">
-              现在是测试阶段。你需要先回到小老师主页，从下拉框选择一个小老师身份，然后再查看个人统计。
+              小老师需要使用邮箱和密码登录后，才能查看个人统计。
             </p>
 
             <Link
-              href="/teacher"
+              href="/login"
               className="mt-5 inline-block rounded-full bg-[#2f5d50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
             >
-              去选择小老师身份
+              前往登录
             </Link>
           </div>
         </section>
@@ -441,16 +455,6 @@ export default function TeacherStatsPage() {
                     );
                     const monthRemainingMinutes =
                       monthStat.totalMinutes % 60;
-
-                    const width =
-                      totalLessons > 0
-                        ? Math.max(
-                            8,
-                            Math.round(
-                              (monthStat.lessonCount / totalLessons) * 100
-                            )
-                          )
-                        : 0;
 
                     return (
                       <article key={monthStat.month} className="p-4">

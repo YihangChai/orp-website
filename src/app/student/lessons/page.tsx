@@ -57,6 +57,7 @@ export default function StudentLessonsPage() {
 
   const [session, setSession] = useState<StudentSession | null>(null);
   const [student, setStudent] = useState<StudentRow | null>(null);
+
   const [records, setRecords] = useState<LessonRecord[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(
     []
@@ -115,12 +116,19 @@ export default function StudentLessonsPage() {
       return;
     }
 
-    const relation = ((relationFromSupabase || []) as ClassRelation[])[0];
+    const relations = (relationFromSupabase || []) as ClassRelation[];
+    const relation = relations[0];
 
     if (!relation) {
       setMessage("没有找到你的班级信息，请联系 ORP 管理员。");
       setIsLoading(false);
       return;
+    }
+
+    if (relations.length > 1) {
+      setMessage(
+        "系统检测到你关联了多个班级。当前页面默认显示第一个班级；后续可以升级为班级切换。"
+      );
     }
 
     const activeClassId = relation.class_id;
@@ -140,34 +148,51 @@ export default function StudentLessonsPage() {
       return;
     }
 
-    const { data: attendanceFromSupabase, error: attendanceError } =
-      await supabase
-        .from("lesson_attendance")
-        .select("id, lesson_record_id, student_id, is_present")
-        .eq("student_id", activeSession.studentId);
+    const lessonRecords = (recordsFromSupabase || []) as LessonRecord[];
+    const lessonRecordIds = lessonRecords.map((record) => record.id);
 
-    if (attendanceError) {
-      setMessage(`读取出勤记录失败：${attendanceError.message}`);
-      setIsLoading(false);
-      return;
-    }
+    let attendanceRows: AttendanceRecord[] = [];
+    let commentRows: StudentLessonComment[] = [];
 
-    const { data: commentsFromSupabase, error: commentsError } = await supabase
-      .from("student_lesson_comments")
-      .select("id, lesson_record_id, student_id, student_name, comment, created_at")
-      .eq("student_id", activeSession.studentId)
-      .order("created_at", { ascending: false });
+    if (lessonRecordIds.length > 0) {
+      const { data: attendanceFromSupabase, error: attendanceError } =
+        await supabase
+          .from("lesson_attendance")
+          .select("id, lesson_record_id, student_id, is_present")
+          .eq("student_id", activeSession.studentId)
+          .in("lesson_record_id", lessonRecordIds);
 
-    if (commentsError) {
-      setMessage(`读取留言失败：${commentsError.message}`);
-      setIsLoading(false);
-      return;
+      if (attendanceError) {
+        setMessage(`读取出勤记录失败：${attendanceError.message}`);
+        setIsLoading(false);
+        return;
+      }
+
+      attendanceRows = (attendanceFromSupabase || []) as AttendanceRecord[];
+
+      const { data: commentsFromSupabase, error: commentsError } =
+        await supabase
+          .from("student_lesson_comments")
+          .select(
+            "id, lesson_record_id, student_id, student_name, comment, created_at"
+          )
+          .eq("student_id", activeSession.studentId)
+          .in("lesson_record_id", lessonRecordIds)
+          .order("created_at", { ascending: false });
+
+      if (commentsError) {
+        setMessage(`读取留言失败：${commentsError.message}`);
+        setIsLoading(false);
+        return;
+      }
+
+      commentRows = (commentsFromSupabase || []) as StudentLessonComment[];
     }
 
     setStudent(studentData);
-    setRecords((recordsFromSupabase || []) as LessonRecord[]);
-    setAttendanceRecords((attendanceFromSupabase || []) as AttendanceRecord[]);
-    setComments((commentsFromSupabase || []) as StudentLessonComment[]);
+    setRecords(lessonRecords);
+    setAttendanceRecords(attendanceRows);
+    setComments(commentRows);
     setIsLoading(false);
   }
 
@@ -233,6 +258,13 @@ export default function StudentLessonsPage() {
       return;
     }
 
+    const lessonExists = records.some((record) => record.id === lessonId);
+
+    if (!lessonExists) {
+      setMessage("这节课不属于当前学生可查看的课程，不能留言。");
+      return;
+    }
+
     const trimmedComment = commentText.trim();
 
     if (!trimmedComment) {
@@ -259,7 +291,9 @@ export default function StudentLessonsPage() {
     setCommentText("");
     setCommentLessonId(null);
     setMessage("留言已提交。");
+
     await fetchLessons(session);
+
     setIsSubmittingComment(false);
   }
 
@@ -325,6 +359,14 @@ export default function StudentLessonsPage() {
             >
               返回学习空间
             </Link>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="w-fit rounded-full border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-white"
+            >
+              退出登录
+            </button>
           </div>
         </div>
 
