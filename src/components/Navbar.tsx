@@ -1,5 +1,5 @@
 import Link from "next/link";
-import StudentAccountMenu from "@/components/StudentAccountMenu";
+import AccountMenu from "@/components/AccountMenu";
 
 export default function Navbar() {
   return (
@@ -18,7 +18,7 @@ export default function Navbar() {
         <Link href="/donation">资助我们</Link>
       </nav>
       
-      <Link href="/login">登录</Link>
+      <AccountMenu />
 
     </header>
   );

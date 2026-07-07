@@ -45,16 +45,13 @@ export default function LoginPage() {
         <section className="mt-8 rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-8">
           <div>
             <p className="text-sm font-semibold text-[#2f5d50]">
-              ORP 管理与教学系统
+              ORP
             </p>
 
             <h1 className="mt-3 text-3xl font-bold text-emerald-950">
               登录
             </h1>
 
-            <p className="mt-3 text-sm leading-7 text-stone-600">
-              管理员和小老师请输入邮箱，学生请输入用户名。系统会自动识别身份并进入对应页面。
-            </p>
           </div>
 
           <form onSubmit={handleLogin} className="mt-6 space-y-5">
@@ -70,7 +67,7 @@ export default function LoginPage() {
                   setAccount(event.target.value);
                   setMessage("");
                 }}
-                placeholder="老师/管理员输入邮箱；学生输入用户名"
+                placeholder="请输入账号"
                 className="mt-2 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:bg-white"
               />
             </div>
@@ -106,16 +103,6 @@ export default function LoginPage() {
               {isLoggingIn ? "正在登录..." : "登录"}
             </button>
           </form>
-
-          <div className="mt-6 rounded-2xl bg-[#fffdf4] p-4">
-            <p className="text-sm font-semibold text-emerald-900">
-              登录说明
-            </p>
-
-            <p className="mt-2 text-sm leading-7 text-stone-600">
-              管理员和小老师使用邮箱登录，例如 teacher@example.com。学生使用用户名登录，例如 student001。
-            </p>
-          </div>
         </section>
       </section>
     </main>
