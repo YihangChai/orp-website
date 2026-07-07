@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import AdminGuard from "@/components/AdminGuard";
 
 type StudentRow = {
   id: string;
@@ -617,294 +618,296 @@ export default function AdminStudentsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
-      <section className="mx-auto max-w-7xl">
-        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-              学生管理
-            </h1>
-          </div>
-          
-          <Link
-            href="/admin"
-            className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-          >
-            返回管理员首页
-          </Link>
-        </div>
-
-        {message && (
-          <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-            {message}
-          </div>
-        )}
-
-        <section className="grid gap-4 md:grid-cols-4">
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">当前学生</p>
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {currentStudentCount}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">已退出学生</p>
-            <p className="mt-2 text-3xl font-bold text-red-700">
-              {withdrawnStudentCount}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">需要关注</p>
-            <p className="mt-2 text-3xl font-bold text-amber-700">
-              {needAttentionCount}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">已生成登录信息</p>
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {generatedAccountCount}
-            </p>
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+    <AdminGuard>
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-7xl">
+          <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div>
-              <h2 className="text-xl font-bold text-emerald-950">学生列表</h2>
+              <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+                学生管理
+              </h1>
+            </div>
+            
+            <Link
+              href="/admin"
+              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+            >
+              返回管理员首页
+            </Link>
+          </div>
 
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                重点看学生是否持续参与课程。出勤率过低或缺少出勤记录的学生会被标记为需要关注。
+          {message && (
+            <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+              {message}
+            </div>
+          )}
+
+          <section className="grid gap-4 md:grid-cols-4">
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <p className="text-sm text-stone-500">当前学生</p>
+              <p className="mt-2 text-3xl font-bold text-emerald-950">
+                {currentStudentCount}
               </p>
             </div>
 
-            <div className="flex flex-col gap-2 md:items-end">
-              <div className="grid gap-2 md:grid-cols-3">
-                <select
-                  value={selectedCohortId}
-                  onChange={(event) => setSelectedCohortId(event.target.value)}
-                  className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
-                >
-                  <option value="all">全部届别</option>
-                  {cohorts.map((cohort) => (
-                    <option key={cohort.id} value={cohort.id}>
-                      {cohort.name}
-                    </option>
-                  ))}
-                </select>
+            <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
+              <p className="text-sm text-stone-500">已退出学生</p>
+              <p className="mt-2 text-3xl font-bold text-red-700">
+                {withdrawnStudentCount}
+              </p>
+            </div>
 
-                <select
-                  value={selectedAccountView}
-                  onChange={(event) =>
-                    setSelectedAccountView(event.target.value)
-                  }
-                  className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
-                >
-                  <option value="all">全部账号状态</option>
-                  <option value="generated">已生成登录信息</option>
-                  <option value="missing">未生成登录信息</option>
-                </select>
+            <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
+              <p className="text-sm text-stone-500">需要关注</p>
+              <p className="mt-2 text-3xl font-bold text-amber-700">
+                {needAttentionCount}
+              </p>
+            </div>
 
-                <input
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="搜索学生、班级、老师..."
-                  className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
-                />
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <p className="text-sm text-stone-500">已生成登录信息</p>
+              <p className="mt-2 text-3xl font-bold text-emerald-950">
+                {generatedAccountCount}
+              </p>
+            </div>
+          </section>
+
+          <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+              <div>
+                <h2 className="text-xl font-bold text-emerald-950">学生列表</h2>
+
+                <p className="mt-2 text-sm leading-7 text-stone-600">
+                  重点看学生是否持续参与课程。出勤率过低或缺少出勤记录的学生会被标记为需要关注。
+                </p>
               </div>
 
-              <button
-                type="button"
-                onClick={generateMissingLoginCodes}
-                disabled={isGeneratingCodes}
-                className="w-fit rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isGeneratingCodes ? "生成中..." : "批量生成登录信息"}
-              </button>
+              <div className="flex flex-col gap-2 md:items-end">
+                <div className="grid gap-2 md:grid-cols-3">
+                  <select
+                    value={selectedCohortId}
+                    onChange={(event) => setSelectedCohortId(event.target.value)}
+                    className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
+                  >
+                    <option value="all">全部届别</option>
+                    {cohorts.map((cohort) => (
+                      <option key={cohort.id} value={cohort.id}>
+                        {cohort.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={selectedAccountView}
+                    onChange={(event) =>
+                      setSelectedAccountView(event.target.value)
+                    }
+                    className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
+                  >
+                    <option value="all">全部账号状态</option>
+                    <option value="generated">已生成登录信息</option>
+                    <option value="missing">未生成登录信息</option>
+                  </select>
+
+                  <input
+                    value={keyword}
+                    onChange={(event) => setKeyword(event.target.value)}
+                    placeholder="搜索学生、班级、老师..."
+                    className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={generateMissingLoginCodes}
+                  disabled={isGeneratingCodes}
+                  className="w-fit rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isGeneratingCodes ? "生成中..." : "批量生成登录信息"}
+                </button>
+              </div>
             </div>
-          </div>
 
-          {isLoading ? (
-            <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
-              正在读取学生数据...
-            </p>
-          ) : filteredStudents.length === 0 ? (
-            <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
-              暂时没有找到符合条件的学生。
-            </p>
-          ) : (
-            <div className="mt-6 overflow-x-auto rounded-2xl border border-emerald-100">
-              <table className="w-full min-w-[1100px] border-collapse bg-white text-left text-sm">
-                <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">学生</th>
-                    <th className="px-4 py-3 font-semibold">班级 / 小老师</th>
-                    <th className="px-4 py-3 font-semibold">上课情况</th>
-                    <th className="px-4 py-3 font-semibold">关注状态</th>
-                    <th className="px-4 py-3 font-semibold">登录信息</th>
-                    <th className="px-4 py-3 font-semibold">状态</th>
-                    <th className="px-4 py-3 font-semibold">操作</th>
-                  </tr>
-                </thead>
+            {isLoading ? (
+              <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
+                正在读取学生数据...
+              </p>
+            ) : filteredStudents.length === 0 ? (
+              <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
+                暂时没有找到符合条件的学生。
+              </p>
+            ) : (
+              <div className="mt-6 overflow-x-auto rounded-2xl border border-emerald-100">
+                <table className="w-full min-w-[1100px] border-collapse bg-white text-left text-sm">
+                  <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">学生</th>
+                      <th className="px-4 py-3 font-semibold">班级 / 小老师</th>
+                      <th className="px-4 py-3 font-semibold">上课情况</th>
+                      <th className="px-4 py-3 font-semibold">关注状态</th>
+                      <th className="px-4 py-3 font-semibold">登录信息</th>
+                      <th className="px-4 py-3 font-semibold">状态</th>
+                      <th className="px-4 py-3 font-semibold">操作</th>
+                    </tr>
+                  </thead>
 
-                <tbody className="divide-y divide-emerald-50">
-                  {filteredStudents.map((student) => {
-                    const attention = getAttentionLabel(student);
+                  <tbody className="divide-y divide-emerald-50">
+                    {filteredStudents.map((student) => {
+                      const attention = getAttentionLabel(student);
 
-                    return (
-                      <tr key={student.id} className="align-top">
-                        <td className="px-4 py-4">
-                          <p className="font-bold text-emerald-950">
-                            {student.name}
-                          </p>
-
-                          {student.note && (
-                            <p className="mt-2 line-clamp-3 max-w-xs text-xs leading-5 text-stone-500">
-                              {student.note}
+                      return (
+                        <tr key={student.id} className="align-top">
+                          <td className="px-4 py-4">
+                            <p className="font-bold text-emerald-950">
+                              {student.name}
                             </p>
-                          )}
-                        </td>
 
-                        <td className="px-4 py-4">
-                          {student.classDescriptions.length === 0 ? (
-                            <p className="text-sm text-red-500">
-                              暂未绑定班级
-                            </p>
-                          ) : (
-                            <div className="space-y-1">
-                              {student.classDescriptions.map((description) => (
-                                <p
-                                  key={description}
-                                  className="rounded-full bg-[#fffdf4] px-3 py-1 text-xs text-stone-600"
-                                >
-                                  {description}
-                                </p>
-                              ))}
-                            </div>
-                          )}
-
-                          <p className="mt-2 text-xs text-stone-500">
-                            小老师：
-                            {student.teacherNames.length > 0
-                              ? student.teacherNames.join("、")
-                              : "暂无"}
-                          </p>
-                        </td>
-
-                        <td className="px-4 py-4">
-                          <p className="font-semibold text-emerald-950">
-                            {student.lessonCount} 节相关课程
-                          </p>
-
-                          <p className="mt-1 text-xs text-stone-500">
-                            出勤：{student.presentCount}/
-                            {student.attendanceCount}
-                          </p>
-
-                          <p className="mt-1 text-xs text-stone-500">
-                            最近课程：{student.recentLessonDate || "暂无"}
-                          </p>
-                        </td>
-
-                        <td className="px-4 py-4">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${attention.className}`}
-                          >
-                            {attention.text}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-4">
-                          {student.studentCode && student.pinCode ? (
-                            <div className="space-y-1 text-xs">
-                              <p>
-                                学生码：
-                                <span className="font-semibold text-emerald-800">
-                                  {student.studentCode}
-                                </span>
+                            {student.note && (
+                              <p className="mt-2 line-clamp-3 max-w-xs text-xs leading-5 text-stone-500">
+                                {student.note}
                               </p>
-
-                              <p>
-                                PIN：
-                                <span className="font-semibold text-emerald-800">
-                                  {student.pinCode}
-                                </span>
-                              </p>
-                            </div>
-                          ) : (
-                            <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-500">
-                              未生成
-                            </span>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-4">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getStudentStatusClassName(
-                              student.status
-                            )}`}
-                          >
-                            {getStudentStatusLabel(student.status)}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-4">
-                          <div className="flex flex-col gap-2">
-                            <Link
-                              href={`/admin/students/${student.id}`}
-                              className="rounded-full border border-emerald-700 px-3 py-1.5 text-center text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                            >
-                              查看详情
-                            </Link>
-
-                            {student.status !== "archived" &&
-                              student.status !== "withdrawn" && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    generateLoginForStudent(student)
-                                  }
-                                  className="rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-50"
-                                >
-                                  {student.studentCode && student.pinCode
-                                    ? "重置 PIN"
-                                    : "生成登录信息"}
-                                </button>
-                              )}
-
-                            {student.status !== "archived" &&
-                              student.status !== "withdrawn" && (
-                                <button
-                                  type="button"
-                                  onClick={() => markStudentWithdrawn(student)}
-                                  className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-                                >
-                                  标记退出
-                                </button>
-                              )}
-
-                            {student.status === "withdrawn" && (
-                              <button
-                                type="button"
-                                onClick={() => restoreStudent(student)}
-                                className="rounded-full border border-emerald-700 px-3 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                              >
-                                恢复当前
-                              </button>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                          </td>
+
+                          <td className="px-4 py-4">
+                            {student.classDescriptions.length === 0 ? (
+                              <p className="text-sm text-red-500">
+                                暂未绑定班级
+                              </p>
+                            ) : (
+                              <div className="space-y-1">
+                                {student.classDescriptions.map((description) => (
+                                  <p
+                                    key={description}
+                                    className="rounded-full bg-[#fffdf4] px-3 py-1 text-xs text-stone-600"
+                                  >
+                                    {description}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+
+                            <p className="mt-2 text-xs text-stone-500">
+                              小老师：
+                              {student.teacherNames.length > 0
+                                ? student.teacherNames.join("、")
+                                : "暂无"}
+                            </p>
+                          </td>
+
+                          <td className="px-4 py-4">
+                            <p className="font-semibold text-emerald-950">
+                              {student.lessonCount} 节相关课程
+                            </p>
+
+                            <p className="mt-1 text-xs text-stone-500">
+                              出勤：{student.presentCount}/
+                              {student.attendanceCount}
+                            </p>
+
+                            <p className="mt-1 text-xs text-stone-500">
+                              最近课程：{student.recentLessonDate || "暂无"}
+                            </p>
+                          </td>
+
+                          <td className="px-4 py-4">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${attention.className}`}
+                            >
+                              {attention.text}
+                            </span>
+                          </td>
+
+                          <td className="px-4 py-4">
+                            {student.studentCode && student.pinCode ? (
+                              <div className="space-y-1 text-xs">
+                                <p>
+                                  学生码：
+                                  <span className="font-semibold text-emerald-800">
+                                    {student.studentCode}
+                                  </span>
+                                </p>
+
+                                <p>
+                                  PIN：
+                                  <span className="font-semibold text-emerald-800">
+                                    {student.pinCode}
+                                  </span>
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-500">
+                                未生成
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="px-4 py-4">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${getStudentStatusClassName(
+                                student.status
+                              )}`}
+                            >
+                              {getStudentStatusLabel(student.status)}
+                            </span>
+                          </td>
+
+                          <td className="px-4 py-4">
+                            <div className="flex flex-col gap-2">
+                              <Link
+                                href={`/admin/students/${student.id}`}
+                                className="rounded-full border border-emerald-700 px-3 py-1.5 text-center text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                              >
+                                查看详情
+                              </Link>
+
+                              {student.status !== "archived" &&
+                                student.status !== "withdrawn" && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      generateLoginForStudent(student)
+                                    }
+                                    className="rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-50"
+                                  >
+                                    {student.studentCode && student.pinCode
+                                      ? "重置 PIN"
+                                      : "生成登录信息"}
+                                  </button>
+                                )}
+
+                              {student.status !== "archived" &&
+                                student.status !== "withdrawn" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => markStudentWithdrawn(student)}
+                                    className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                                  >
+                                    标记退出
+                                  </button>
+                                )}
+
+                              {student.status === "withdrawn" && (
+                                <button
+                                  type="button"
+                                  onClick={() => restoreStudent(student)}
+                                  className="rounded-full border border-emerald-700 px-3 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                                >
+                                  恢复当前
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </section>
-      </section>
-    </main>
+      </main>
+    </AdminGuard>
   );
 }

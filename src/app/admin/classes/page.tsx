@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import AdminGuard from "@/components/AdminGuard";
 
 type ImportClassRow = {
   cohort: string;
@@ -58,7 +59,7 @@ type CreateClassRequestPayload = {
   note: string;
 };
 
-const TOTAL_ADMIN_COUNT = 1;
+const TOTAL_ADMIN_COUNT = 4;
 const DELETE_CLASS_REQUIRED_APPROVALS = 2;
 const CREATE_CLASS_REQUIRED_APPROVALS = TOTAL_ADMIN_COUNT;
 
@@ -1611,695 +1612,697 @@ export default function AdminClassesPage() {
   );
 
   return (
-    <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
-      <section className="mx-auto max-w-7xl">
-        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-              班级与分班管理
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里用于批量提交分班创建申请、修改班级信息、处理删除申请和封存旧届别。新增班级需要管理员确认后才会正式写入系统。
+    <AdminGuard>
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-7xl">
+          <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+            <div>
+              <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+                班级与分班管理
+              </h1>
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
+                这里用于批量提交分班创建申请、修改班级信息、处理删除申请和封存旧届别。新增班级需要管理员确认后才会正式写入系统。
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {showImportPanel ? (
+                <button
+                  type="button"
+                  onClick={() => setShowImportPanel(false)}
+                  className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                >
+                  返回班级管理
+                </button>
+              ) : (
+                <Link
+                  href="/admin"
+                  className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                >
+                  返回管理员主页
+                </Link>
+              )}
+            </div>
+          </div>
+
+          <section className="mb-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+            <p className="font-semibold text-emerald-900">当前确认管理员</p>
+
+            <p className="mt-2 text-sm leading-7 text-stone-600">
+              现在还没有正式登录系统，所以先用管理员姓名模拟。所有创建、删除和封存确认都会记录这个名字，同一管理员不能重复确认同一个申请。
             </p>
-          </div>
 
-          <div className="flex flex-wrap gap-2">
-            {showImportPanel ? (
-              <button
-                type="button"
-                onClick={() => setShowImportPanel(false)}
-                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-              >
-                返回班级管理
-              </button>
-            ) : (
-              <Link
-                href="/admin"
-                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-              >
-                返回管理员主页
-              </Link>
-            )}
-          </div>
-        </div>
+            <input
+              value={currentAdminName}
+              onChange={(event) => setCurrentAdminName(event.target.value)}
+              placeholder="填写当前管理员姓名，例如 Ethan"
+              className="mt-3 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none focus:border-emerald-500 md:max-w-sm"
+            />
+          </section>
 
-        <section className="mb-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <p className="font-semibold text-emerald-900">当前确认管理员</p>
+          {message && (
+            <div className="mb-6 rounded-2xl border border-emerald-100 bg-white p-4 text-sm font-semibold text-emerald-800 shadow-sm">
+              {message}
+            </div>
+          )}
 
-          <p className="mt-2 text-sm leading-7 text-stone-600">
-            现在还没有正式登录系统，所以先用管理员姓名模拟。所有创建、删除和封存确认都会记录这个名字，同一管理员不能重复确认同一个申请。
-          </p>
+          {createClassRequests.length > 0 && (
+            <section className="mb-6 rounded-[1.75rem] border border-amber-100 bg-amber-50 p-5 shadow-sm md:p-6">
+              <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                <div>
+                  <h2 className="text-xl font-bold text-amber-900">
+                    待确认班级创建申请
+                  </h2>
 
-          <input
-            value={currentAdminName}
-            onChange={(event) => setCurrentAdminName(event.target.value)}
-            placeholder="填写当前管理员姓名，例如 Ethan"
-            className="mt-3 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none focus:border-emerald-500 md:max-w-sm"
-          />
-        </section>
+                  <p className="mt-2 text-sm leading-7 text-amber-800">
+                    创建班级属于高影响操作。只有管理员确认数达到要求后，系统才会真正创建届别、班级、小老师和学生关系。
+                  </p>
+                </div>
 
-        {message && (
-          <div className="mb-6 rounded-2xl border border-emerald-100 bg-white p-4 text-sm font-semibold text-emerald-800 shadow-sm">
-            {message}
-          </div>
-        )}
+                <button
+                  type="button"
+                  onClick={approveAllCreateClassRequests}
+                  disabled={
+                    isApprovingAllCreateRequests || createClassRequests.length === 0
+                  }
+                  className="w-fit rounded-full bg-amber-100 px-5 py-2.5 text-sm font-semibold text-amber-900 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isApprovingAllCreateRequests
+                    ? "正在统一确认..."
+                    : `统一确认全部 ${createClassRequests.length} 个申请`}
+                </button>
+              </div>
 
-        {createClassRequests.length > 0 && (
-          <section className="mb-6 rounded-[1.75rem] border border-amber-100 bg-amber-50 p-5 shadow-sm md:p-6">
-            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-              <div>
-                <h2 className="text-xl font-bold text-amber-900">
-                  待确认班级创建申请
-                </h2>
+              <div className="mt-4 space-y-3">
+                {createClassRequests.map((request) => {
+                  const payload = readCreateClassPayload(request.note);
 
-                <p className="mt-2 text-sm leading-7 text-amber-800">
-                  创建班级属于高影响操作。只有管理员确认数达到要求后，系统才会真正创建届别、班级、小老师和学生关系。
+                  return (
+                    <div
+                      key={request.id}
+                      className="rounded-2xl border border-amber-100 bg-white p-4"
+                    >
+                      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                        <div>
+                          <p className="text-sm font-bold text-amber-900">
+                            {payload
+                              ? `${payload.cohortName} / ${payload.className}`
+                              : request.target_name}
+                          </p>
+
+                          {payload && (
+                            <div className="mt-2 space-y-1 text-sm text-stone-600">
+                              <p>合作学校：{payload.school || "未填写"}</p>
+                              <p>小老师：{payload.teacherName}</p>
+                              <p>学生：{payload.studentNames.join("、")}</p>
+                              {payload.note && <p>备注：{payload.note}</p>}
+                            </div>
+                          )}
+
+                          <p className="mt-2 text-sm font-semibold text-amber-800">
+                            当前确认数：{request.approvals_count}/
+                            {request.required_approvals}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => approveCreateClassRequest(request)}
+                            className="rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-200"
+                          >
+                            确认创建
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => cancelCreateClassRequest(request)}
+                            className="rounded-full border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                          >
+                            取消申请
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {showImportPanel ? (
+            <section className="rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-7">
+              <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+                <div>
+                  <h2 className="text-2xl font-bold text-emerald-950">
+                    批量提交分班创建申请
+                  </h2>
+
+                  <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
+                    从 Excel 或 Google Sheets 复制表格后粘贴到这里。推荐列顺序：
+                    <span className="font-semibold text-emerald-800">
+                      {" "}
+                      届别、班级名称、合作学校、小老师、学生名单、备注
+                    </span>
+                    。学生名单可以用顿号、逗号、分号分隔。提交后不会直接创建班级，需要管理员确认。
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleUseSample}
+                    className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                  >
+                    使用示例
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleClear}
+                    className="rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
+                  >
+                    清空
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4 text-sm leading-7 text-stone-600">
+                <p className="font-semibold text-emerald-900">示例格式：</p>
+                <p className="mt-2 overflow-x-auto whitespace-pre text-xs leading-6">
+                  届别	班级名称	合作学校	小老师	学生名单	备注
+                  {"\n"}
+                  2026 暑期	秋叶班	河北某小学	Ethan	学生A、学生B、学生C	阅读基础较弱
+                  {"\n"}
+                  2026 暑期	蓝天班	河北某小学	Cindy	学生D、学生E、学生F	喜欢历史
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={approveAllCreateClassRequests}
-                disabled={
-                  isApprovingAllCreateRequests || createClassRequests.length === 0
-                }
-                className="w-fit rounded-full bg-amber-100 px-5 py-2.5 text-sm font-semibold text-amber-900 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isApprovingAllCreateRequests
-                  ? "正在统一确认..."
-                  : `统一确认全部 ${createClassRequests.length} 个申请`}
-              </button>
-            </div>
+              <textarea
+                value={importText}
+                onChange={(event) => {
+                  setImportText(event.target.value);
+                  setHasParsed(false);
+                  setMessage("");
+                }}
+                rows={12}
+                placeholder="从 Excel 或 Google Sheets 复制分班表，然后粘贴到这里。"
+                className="mt-5 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 font-mono text-sm leading-7 outline-none transition focus:border-emerald-500 focus:bg-white"
+              />
 
-            <div className="mt-4 space-y-3">
-              {createClassRequests.map((request) => {
-                const payload = readCreateClassPayload(request.note);
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleParse}
+                  className="rounded-full bg-[#2f5d50] px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
+                >
+                  预览
+                </button>
 
-                return (
-                  <div
-                    key={request.id}
-                    className="rounded-2xl border border-amber-100 bg-white p-4"
-                  >
-                    <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                      <div>
-                        <p className="text-sm font-bold text-amber-900">
-                          {payload
-                            ? `${payload.cohortName} / ${payload.className}`
-                            : request.target_name}
-                        </p>
+                <button
+                  type="button"
+                  onClick={handleImport}
+                  disabled={isImporting || importText.trim().length === 0}
+                  className="rounded-full border border-emerald-700 px-6 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isImporting ? "正在提交..." : "提交创建申请"}
+                </button>
+              </div>
 
-                        {payload && (
-                          <div className="mt-2 space-y-1 text-sm text-stone-600">
-                            <p>合作学校：{payload.school || "未填写"}</p>
-                            <p>小老师：{payload.teacherName}</p>
-                            <p>学生：{payload.studentNames.join("、")}</p>
-                            {payload.note && <p>备注：{payload.note}</p>}
-                          </div>
-                        )}
+              {hasParsed && (
+                <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5">
+                  <h3 className="text-xl font-bold text-emerald-950">
+                    导入预览
+                  </h3>
 
-                        <p className="mt-2 text-sm font-semibold text-amber-800">
-                          当前确认数：{request.approvals_count}/
-                          {request.required_approvals}
+                  {errors.length > 0 && (
+                    <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
+                      <p className="text-sm font-semibold text-red-700">
+                        发现 {errors.length} 个格式问题
+                      </p>
+
+                      <div className="mt-3 space-y-2">
+                        {errors.map((error, index) => (
+                          <p key={index} className="text-sm text-red-700">
+                            第 {error.lineNumber} 行：{error.message}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {rows.length > 0 && (
+                    <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl bg-[#fffdf4] p-4">
+                        <p className="text-sm text-stone-500">班级数量</p>
+                        <p className="mt-1 text-3xl font-bold text-emerald-950">
+                          {rows.length}
                         </p>
                       </div>
 
-                      <div className="flex flex-wrap gap-2">
+                      <div className="rounded-2xl bg-[#fffdf4] p-4">
+                        <p className="text-sm text-stone-500">学生数量</p>
+                        <p className="mt-1 text-3xl font-bold text-emerald-950">
+                          {totalStudents}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-[#fffdf4] p-4">
+                        <p className="text-sm text-stone-500">小老师数量</p>
+                        <p className="mt-1 text-3xl font-bold text-emerald-950">
+                          {totalTeachers}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+            </section>
+          ) : (
+            <section className="mb-6 rounded-[1.75rem] border border-dashed border-emerald-200 bg-white p-5 shadow-sm md:p-6">
+              <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+                <div>
+                  <h2 className="text-xl font-bold text-emerald-950">
+                    班级日常管理
+                  </h2>
+
+                  <p className="mt-2 text-sm leading-7 text-stone-600">
+                    创建和换届通常一年只做一次。日常管理主要是查看班级详情、核对成员、查看课程记录和教学进展。
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowImportPanel(true)}
+                  className="w-fit rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
+                >
+                  补充导入
+                </button>
+              </div>
+            </section>
+          )}
+
+          <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+              <div>
+                <h2 className="text-xl font-bold text-emerald-950">
+                  已导入班级
+                </h2>
+
+                <p className="mt-2 text-sm leading-7 text-stone-600">
+                  默认只显示运行中的班级。已封存的历史届别不会出现在默认列表里，但可以通过筛选查看。
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 md:items-end">
+                <div className="flex flex-col gap-2 md:flex-row">
+                  <select
+                    value={selectedClassView}
+                    onChange={(event) => setSelectedClassView(event.target.value)}
+                    className="w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-2.5 text-sm outline-none focus:border-emerald-500 md:w-64"
+                  >
+                    <option value="active">当前运行中 / 待处理班级</option>
+
+                    {cohorts.map((cohort) => (
+                      <option key={cohort.id} value={cohort.id}>
+                        {cohort.name} -{" "}
+                        {cohort.status === "active" ? "运行中" : "已封存"}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsClassListOpen((prev) => !prev)}
+                    className="rounded-2xl border border-emerald-700 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                  >
+                    {isClassListOpen ? "收起列表" : "展开列表"}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <span className="w-fit rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                    运行中 {activeClasses.length}
+                  </span>
+
+                  <span className="w-fit rounded-full bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-600">
+                    已封存 {archivedClasses.length}
+                  </span>
+
+                  <span className="w-fit rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700">
+                    删除申请 {deleteRequestedClasses.length}
+                  </span>
+
+                  <span className="w-fit rounded-full bg-[#fffdf4] px-3 py-1.5 text-xs font-semibold text-stone-600">
+                    当前显示 {filteredClasses.length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {!isClassListOpen ? (
+              <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
+                班级列表已收起。当前筛选条件下共有 {filteredClasses.length} 个班级。
+              </p>
+            ) : filteredClasses.length === 0 ? (
+              <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
+                当前筛选条件下没有班级。你可以切换届别筛选，或者使用补充导入添加新班级。
+              </p>
+            ) : (
+              <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100">
+                <table className="w-full min-w-[1250px] border-collapse bg-white text-left text-sm">
+                  <thead className="bg-[#fffdf4] text-stone-600">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">届别</th>
+                      <th className="px-4 py-3 font-semibold">班级</th>
+                      <th className="px-4 py-3 font-semibold">合作学校</th>
+                      <th className="px-4 py-3 font-semibold">小老师</th>
+                      <th className="px-4 py-3 font-semibold">学生名单</th>
+                      <th className="px-4 py-3 font-semibold">人数</th>
+                      <th className="px-4 py-3 font-semibold">状态</th>
+                      <th className="px-4 py-3 font-semibold">删除流程</th>
+                      <th className="px-4 py-3 font-semibold">操作</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {filteredClasses.map((classItem) => {
+                      const deleteRequest = getClassDeleteRequest(classItem.id);
+
+                      return (
+                        <tr
+                          key={classItem.id}
+                          className="border-t border-emerald-50"
+                        >
+                          {editingClassId === classItem.id ? (
+                            <>
+                              <td className="px-4 py-4 align-top text-stone-600">
+                                {classItem.cohortName}
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                <input
+                                  value={editClassName}
+                                  onChange={(event) =>
+                                    setEditClassName(event.target.value)
+                                  }
+                                  className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm font-semibold outline-none focus:border-emerald-500"
+                                />
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                <input
+                                  value={editSchool}
+                                  onChange={(event) =>
+                                    setEditSchool(event.target.value)
+                                  }
+                                  className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                                  placeholder="合作学校"
+                                />
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                <input
+                                  value={editTeacherNames}
+                                  onChange={(event) =>
+                                    setEditTeacherNames(event.target.value)
+                                  }
+                                  className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                                  placeholder="多位小老师用顿号分隔"
+                                />
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                <textarea
+                                  value={editStudentNames}
+                                  onChange={(event) =>
+                                    setEditStudentNames(event.target.value)
+                                  }
+                                  rows={3}
+                                  className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm leading-6 outline-none focus:border-emerald-500"
+                                  placeholder="学生A、学生B、学生C"
+                                />
+                              </td>
+
+                              <td className="px-4 py-4 align-top font-semibold text-stone-700">
+                                {splitNames(editStudentNames).length}
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                                  编辑中
+                                </span>
+                              </td>
+
+                              <td className="px-4 py-4 align-top text-stone-400">
+                                暂停操作
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                <div className="flex flex-col gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveClassEdit(classItem.id)}
+                                    disabled={isSavingEdit}
+                                    className="rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {isSavingEdit ? "保存中" : "保存"}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={cancelEditingClass}
+                                    className="rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-4 align-top text-stone-600">
+                                {classItem.cohortName}
+                              </td>
+
+                              <td className="px-4 py-4 align-top font-bold text-emerald-950">
+                                {classItem.name}
+                              </td>
+
+                              <td className="px-4 py-4 align-top text-stone-600">
+                                {classItem.school || "暂未填写"}
+                              </td>
+
+                              <td className="px-4 py-4 align-top text-stone-600">
+                                {classItem.teacherNames.length > 0
+                                  ? classItem.teacherNames.join("、")
+                                  : "暂未分配"}
+                              </td>
+
+                              <td className="px-4 py-4 align-top text-stone-600">
+                                <div className="flex flex-wrap gap-2">
+                                  {classItem.studentNames.length > 0 ? (
+                                    classItem.studentNames.map((studentName) => (
+                                      <span
+                                        key={studentName}
+                                        className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
+                                      >
+                                        {studentName}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-stone-400">
+                                      暂无学生
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-4 align-top font-semibold text-stone-700">
+                                {classItem.studentNames.length}
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                <span
+                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClassName(
+                                    classItem.status
+                                  )}`}
+                                >
+                                  {getStatusLabel(classItem.status)}
+                                </span>
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                {deleteRequest ? (
+                                  <div className="space-y-2">
+                                    <p className="text-xs font-semibold text-red-700">
+                                      {deleteRequest.approvals_count}/
+                                      {deleteRequest.required_approvals} 已确认
+                                    </p>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        approveDeleteClass(classItem)
+                                      }
+                                      className="rounded-full border border-red-100 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                                    >
+                                      确认删除
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        cancelDeleteRequest(
+                                          classItem.id,
+                                          classItem.name
+                                        )
+                                      }
+                                      className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-50"
+                                    >
+                                      撤回申请
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-stone-400">
+                                    无申请
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-4 align-top">
+                                <div className="flex flex-col gap-2">
+                                  <Link
+                                    href={`/admin/classes/${classItem.id}`}
+                                    className="rounded-full bg-[#2f5d50] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-emerald-900"
+                                  >
+                                    查看详情
+                                  </Link>
+
+                                  {classItem.status !== "archived" && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        startEditingClass(classItem)
+                                      }
+                                      className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                                    >
+                                      编辑
+                                    </button>
+                                  )}
+
+                                  {!deleteRequest &&
+                                    classItem.status !== "archived" && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          requestDeleteClass(
+                                            classItem.id,
+                                            classItem.name
+                                          )
+                                        }
+                                        className="rounded-full border border-red-100 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+                                      >
+                                        申请删除
+                                      </button>
+                                    )}
+                                </div>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {!showImportPanel && (
+            <section
+              id="danger-zone"
+              className="mt-8 rounded-[1.75rem] border border-red-100 bg-white p-5 shadow-sm md:p-6"
+            >
+              <h2 className="text-xl font-bold text-red-800">
+                学年结束与整届封存
+              </h2>
+
+              <p className="mt-2 text-sm leading-7 text-stone-600">
+                这个区域只在一届课程真正结束后使用。封存会把这一届所有班级改为已封存，并同步归档只属于这一届的老师和学生。封存需要所有管理员确认，目前系统临时设定为 {TOTAL_ADMIN_COUNT} 位管理员。
+              </p>
+
+              <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center">
+                <select
+                  value={selectedArchiveCohortId}
+                  onChange={(event) =>
+                    setSelectedArchiveCohortId(event.target.value)
+                  }
+                  className="w-full rounded-2xl border border-red-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none focus:border-red-300 md:max-w-xs"
+                >
+                  {cohorts.length === 0 ? (
+                    <option value="">暂无届别</option>
+                  ) : (
+                    cohorts.map((cohort) => (
+                      <option key={cohort.id} value={cohort.id}>
+                        {cohort.name} -{" "}
+                        {cohort.status === "active" ? "运行中" : "已封存"}
+                      </option>
+                    ))
+                  )}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={archiveSelectedCohort}
+                  disabled={isArchivingCohort || !selectedArchiveCohortId}
+                  className="w-fit rounded-full border border-red-200 px-5 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isArchivingCohort ? "正在提交..." : "提交整届封存申请"}
+                </button>
+              </div>
+
+              {archiveRequests.length > 0 && (
+                <div className="mt-5 space-y-3">
+                  {archiveRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      className="rounded-2xl border border-red-100 bg-red-50 p-4"
+                    >
+                      <p className="text-sm font-bold text-red-800">
+                        {request.target_name} 封存申请
+                      </p>
+
+                      <p className="mt-1 text-sm text-red-700">
+                        当前确认数：{request.approvals_count}/
+                        {request.required_approvals}
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => approveCreateClassRequest(request)}
-                          className="rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-200"
+                          onClick={() => approveArchiveCohort(request)}
+                          className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
                         >
-                          确认创建
+                          确认封存
                         </button>
 
                         <button
                           type="button"
-                          onClick={() => cancelCreateClassRequest(request)}
-                          className="rounded-full border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                          onClick={() => cancelArchiveCohortRequest(request)}
+                          className="rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
                         >
                           取消申请
                         </button>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {showImportPanel ? (
-          <section className="rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-7">
-            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
-              <div>
-                <h2 className="text-2xl font-bold text-emerald-950">
-                  批量提交分班创建申请
-                </h2>
-
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-                  从 Excel 或 Google Sheets 复制表格后粘贴到这里。推荐列顺序：
-                  <span className="font-semibold text-emerald-800">
-                    {" "}
-                    届别、班级名称、合作学校、小老师、学生名单、备注
-                  </span>
-                  。学生名单可以用顿号、逗号、分号分隔。提交后不会直接创建班级，需要管理员确认。
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleUseSample}
-                  className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                >
-                  使用示例
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  className="rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
-                >
-                  清空
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4 text-sm leading-7 text-stone-600">
-              <p className="font-semibold text-emerald-900">示例格式：</p>
-              <p className="mt-2 overflow-x-auto whitespace-pre text-xs leading-6">
-                届别	班级名称	合作学校	小老师	学生名单	备注
-                {"\n"}
-                2026 暑期	秋叶班	河北某小学	Ethan	学生A、学生B、学生C	阅读基础较弱
-                {"\n"}
-                2026 暑期	蓝天班	河北某小学	Cindy	学生D、学生E、学生F	喜欢历史
-              </p>
-            </div>
-
-            <textarea
-              value={importText}
-              onChange={(event) => {
-                setImportText(event.target.value);
-                setHasParsed(false);
-                setMessage("");
-              }}
-              rows={12}
-              placeholder="从 Excel 或 Google Sheets 复制分班表，然后粘贴到这里。"
-              className="mt-5 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 font-mono text-sm leading-7 outline-none transition focus:border-emerald-500 focus:bg-white"
-            />
-
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={handleParse}
-                className="rounded-full bg-[#2f5d50] px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
-              >
-                预览
-              </button>
-
-              <button
-                type="button"
-                onClick={handleImport}
-                disabled={isImporting || importText.trim().length === 0}
-                className="rounded-full border border-emerald-700 px-6 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isImporting ? "正在提交..." : "提交创建申请"}
-              </button>
-            </div>
-
-            {hasParsed && (
-              <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5">
-                <h3 className="text-xl font-bold text-emerald-950">
-                  导入预览
-                </h3>
-
-                {errors.length > 0 && (
-                  <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
-                    <p className="text-sm font-semibold text-red-700">
-                      发现 {errors.length} 个格式问题
-                    </p>
-
-                    <div className="mt-3 space-y-2">
-                      {errors.map((error, index) => (
-                        <p key={index} className="text-sm text-red-700">
-                          第 {error.lineNumber} 行：{error.message}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {rows.length > 0 && (
-                  <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl bg-[#fffdf4] p-4">
-                      <p className="text-sm text-stone-500">班级数量</p>
-                      <p className="mt-1 text-3xl font-bold text-emerald-950">
-                        {rows.length}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl bg-[#fffdf4] p-4">
-                      <p className="text-sm text-stone-500">学生数量</p>
-                      <p className="mt-1 text-3xl font-bold text-emerald-950">
-                        {totalStudents}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl bg-[#fffdf4] p-4">
-                      <p className="text-sm text-stone-500">小老师数量</p>
-                      <p className="mt-1 text-3xl font-bold text-emerald-950">
-                        {totalTeachers}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </section>
-            )}
-          </section>
-        ) : (
-          <section className="mb-6 rounded-[1.75rem] border border-dashed border-emerald-200 bg-white p-5 shadow-sm md:p-6">
-            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
-              <div>
-                <h2 className="text-xl font-bold text-emerald-950">
-                  班级日常管理
-                </h2>
-
-                <p className="mt-2 text-sm leading-7 text-stone-600">
-                  创建和换届通常一年只做一次。日常管理主要是查看班级详情、核对成员、查看课程记录和教学进展。
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowImportPanel(true)}
-                className="w-fit rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
-              >
-                补充导入
-              </button>
-            </div>
-          </section>
-        )}
-
-        <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
-            <div>
-              <h2 className="text-xl font-bold text-emerald-950">
-                已导入班级
-              </h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                默认只显示运行中的班级。已封存的历史届别不会出现在默认列表里，但可以通过筛选查看。
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3 md:items-end">
-              <div className="flex flex-col gap-2 md:flex-row">
-                <select
-                  value={selectedClassView}
-                  onChange={(event) => setSelectedClassView(event.target.value)}
-                  className="w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-2.5 text-sm outline-none focus:border-emerald-500 md:w-64"
-                >
-                  <option value="active">当前运行中 / 待处理班级</option>
-
-                  {cohorts.map((cohort) => (
-                    <option key={cohort.id} value={cohort.id}>
-                      {cohort.name} -{" "}
-                      {cohort.status === "active" ? "运行中" : "已封存"}
-                    </option>
                   ))}
-                </select>
-
-                <button
-                  type="button"
-                  onClick={() => setIsClassListOpen((prev) => !prev)}
-                  className="rounded-2xl border border-emerald-700 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                >
-                  {isClassListOpen ? "收起列表" : "展开列表"}
-                </button>
-              </div>
-
-              <div className="flex flex-wrap justify-end gap-2">
-                <span className="w-fit rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
-                  运行中 {activeClasses.length}
-                </span>
-
-                <span className="w-fit rounded-full bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-600">
-                  已封存 {archivedClasses.length}
-                </span>
-
-                <span className="w-fit rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700">
-                  删除申请 {deleteRequestedClasses.length}
-                </span>
-
-                <span className="w-fit rounded-full bg-[#fffdf4] px-3 py-1.5 text-xs font-semibold text-stone-600">
-                  当前显示 {filteredClasses.length}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {!isClassListOpen ? (
-            <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-              班级列表已收起。当前筛选条件下共有 {filteredClasses.length} 个班级。
-            </p>
-          ) : filteredClasses.length === 0 ? (
-            <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-              当前筛选条件下没有班级。你可以切换届别筛选，或者使用补充导入添加新班级。
-            </p>
-          ) : (
-            <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100">
-              <table className="w-full min-w-[1250px] border-collapse bg-white text-left text-sm">
-                <thead className="bg-[#fffdf4] text-stone-600">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">届别</th>
-                    <th className="px-4 py-3 font-semibold">班级</th>
-                    <th className="px-4 py-3 font-semibold">合作学校</th>
-                    <th className="px-4 py-3 font-semibold">小老师</th>
-                    <th className="px-4 py-3 font-semibold">学生名单</th>
-                    <th className="px-4 py-3 font-semibold">人数</th>
-                    <th className="px-4 py-3 font-semibold">状态</th>
-                    <th className="px-4 py-3 font-semibold">删除流程</th>
-                    <th className="px-4 py-3 font-semibold">操作</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {filteredClasses.map((classItem) => {
-                    const deleteRequest = getClassDeleteRequest(classItem.id);
-
-                    return (
-                      <tr
-                        key={classItem.id}
-                        className="border-t border-emerald-50"
-                      >
-                        {editingClassId === classItem.id ? (
-                          <>
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              {classItem.cohortName}
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <input
-                                value={editClassName}
-                                onChange={(event) =>
-                                  setEditClassName(event.target.value)
-                                }
-                                className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm font-semibold outline-none focus:border-emerald-500"
-                              />
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <input
-                                value={editSchool}
-                                onChange={(event) =>
-                                  setEditSchool(event.target.value)
-                                }
-                                className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                                placeholder="合作学校"
-                              />
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <input
-                                value={editTeacherNames}
-                                onChange={(event) =>
-                                  setEditTeacherNames(event.target.value)
-                                }
-                                className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                                placeholder="多位小老师用顿号分隔"
-                              />
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <textarea
-                                value={editStudentNames}
-                                onChange={(event) =>
-                                  setEditStudentNames(event.target.value)
-                                }
-                                rows={3}
-                                className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm leading-6 outline-none focus:border-emerald-500"
-                                placeholder="学生A、学生B、学生C"
-                              />
-                            </td>
-
-                            <td className="px-4 py-4 align-top font-semibold text-stone-700">
-                              {splitNames(editStudentNames).length}
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                                编辑中
-                              </span>
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-400">
-                              暂停操作
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <div className="flex flex-col gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => saveClassEdit(classItem.id)}
-                                  disabled={isSavingEdit}
-                                  className="rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {isSavingEdit ? "保存中" : "保存"}
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={cancelEditingClass}
-                                  className="rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
-                                >
-                                  取消
-                                </button>
-                              </div>
-                            </td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              {classItem.cohortName}
-                            </td>
-
-                            <td className="px-4 py-4 align-top font-bold text-emerald-950">
-                              {classItem.name}
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              {classItem.school || "暂未填写"}
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              {classItem.teacherNames.length > 0
-                                ? classItem.teacherNames.join("、")
-                                : "暂未分配"}
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              <div className="flex flex-wrap gap-2">
-                                {classItem.studentNames.length > 0 ? (
-                                  classItem.studentNames.map((studentName) => (
-                                    <span
-                                      key={studentName}
-                                      className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
-                                    >
-                                      {studentName}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-stone-400">
-                                    暂无学生
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-4 align-top font-semibold text-stone-700">
-                              {classItem.studentNames.length}
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <span
-                                className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClassName(
-                                  classItem.status
-                                )}`}
-                              >
-                                {getStatusLabel(classItem.status)}
-                              </span>
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              {deleteRequest ? (
-                                <div className="space-y-2">
-                                  <p className="text-xs font-semibold text-red-700">
-                                    {deleteRequest.approvals_count}/
-                                    {deleteRequest.required_approvals} 已确认
-                                  </p>
-
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      approveDeleteClass(classItem)
-                                    }
-                                    className="rounded-full border border-red-100 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-                                  >
-                                    确认删除
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      cancelDeleteRequest(
-                                        classItem.id,
-                                        classItem.name
-                                      )
-                                    }
-                                    className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-50"
-                                  >
-                                    撤回申请
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-stone-400">
-                                  无申请
-                                </span>
-                              )}
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <div className="flex flex-col gap-2">
-                                <Link
-                                  href={`/admin/classes/${classItem.id}`}
-                                  className="rounded-full bg-[#2f5d50] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-emerald-900"
-                                >
-                                  查看详情
-                                </Link>
-
-                                {classItem.status !== "archived" && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      startEditingClass(classItem)
-                                    }
-                                    className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                                  >
-                                    编辑
-                                  </button>
-                                )}
-
-                                {!deleteRequest &&
-                                  classItem.status !== "archived" && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        requestDeleteClass(
-                                          classItem.id,
-                                          classItem.name
-                                        )
-                                      }
-                                      className="rounded-full border border-red-100 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
-                                    >
-                                      申请删除
-                                    </button>
-                                  )}
-                              </div>
-                            </td>
-                          </>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              )}
+            </section>
           )}
         </section>
-
-        {!showImportPanel && (
-          <section
-            id="danger-zone"
-            className="mt-8 rounded-[1.75rem] border border-red-100 bg-white p-5 shadow-sm md:p-6"
-          >
-            <h2 className="text-xl font-bold text-red-800">
-              学年结束与整届封存
-            </h2>
-
-            <p className="mt-2 text-sm leading-7 text-stone-600">
-              这个区域只在一届课程真正结束后使用。封存会把这一届所有班级改为已封存，并同步归档只属于这一届的老师和学生。封存需要所有管理员确认，目前系统临时设定为 {TOTAL_ADMIN_COUNT} 位管理员。
-            </p>
-
-            <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center">
-              <select
-                value={selectedArchiveCohortId}
-                onChange={(event) =>
-                  setSelectedArchiveCohortId(event.target.value)
-                }
-                className="w-full rounded-2xl border border-red-100 bg-[#fffdf4] px-4 py-3 text-sm outline-none focus:border-red-300 md:max-w-xs"
-              >
-                {cohorts.length === 0 ? (
-                  <option value="">暂无届别</option>
-                ) : (
-                  cohorts.map((cohort) => (
-                    <option key={cohort.id} value={cohort.id}>
-                      {cohort.name} -{" "}
-                      {cohort.status === "active" ? "运行中" : "已封存"}
-                    </option>
-                  ))
-                )}
-              </select>
-
-              <button
-                type="button"
-                onClick={archiveSelectedCohort}
-                disabled={isArchivingCohort || !selectedArchiveCohortId}
-                className="w-fit rounded-full border border-red-200 px-5 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isArchivingCohort ? "正在提交..." : "提交整届封存申请"}
-              </button>
-            </div>
-
-            {archiveRequests.length > 0 && (
-              <div className="mt-5 space-y-3">
-                {archiveRequests.map((request) => (
-                  <div
-                    key={request.id}
-                    className="rounded-2xl border border-red-100 bg-red-50 p-4"
-                  >
-                    <p className="text-sm font-bold text-red-800">
-                      {request.target_name} 封存申请
-                    </p>
-
-                    <p className="mt-1 text-sm text-red-700">
-                      当前确认数：{request.approvals_count}/
-                      {request.required_approvals}
-                    </p>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => approveArchiveCohort(request)}
-                        className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
-                      >
-                        确认封存
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => cancelArchiveCohortRequest(request)}
-                        className="rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
-                      >
-                        取消申请
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-      </section>
-    </main>
+      </main>
+    </AdminGuard>
   );
 }

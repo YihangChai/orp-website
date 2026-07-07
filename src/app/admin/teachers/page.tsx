@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import AdminGuard from "@/components/AdminGuard";
 
 const DELETE_TEACHER_REQUIRED_APPROVALS = 2;
 
@@ -593,361 +594,363 @@ export default function AdminTeachersPage() {
   );
 
   return (
-    <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
-      <section className="mx-auto max-w-7xl">
-        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <p className="text-sm font-semibold text-[#2f5d50]">
-              Admin / 小老师管理
-            </p>
-
-            <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-              小老师管理
-            </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              小老师由班级管理中的分班导入自动创建。这里用于查看小老师、核对负责班级、处理账号绑定和删除错建资料。
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/admin"
-              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-            >
-              返回管理员首页
-            </Link>
-          </div>
-        </div>
-
-        {message && (
-          <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-            {message}
-          </div>
-        )}
-
-        <section className="grid gap-4 md:grid-cols-4">
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">在任小老师</p>
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {currentTeacherCount}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">已归档小老师</p>
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {archivedTeacherCount}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">未绑定账号</p>
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {unboundTeacherCount}
-            </p>
-            <p className="mt-1 text-xs text-stone-500">
-              账号系统接入后会逐步减少
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">课程记录</p>
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {totalLessonCount}
-            </p>
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-[1.75rem] border border-dashed border-emerald-200 bg-[#fffdf4] p-5 shadow-sm md:p-6">
-          <h2 className="text-xl font-bold text-emerald-950">
-            邮件邀请注册 / 账号绑定
-          </h2>
-
-          <p className="mt-2 text-sm leading-7 text-stone-600">
-            小老师资料应该先通过班级管理导入并绑定到具体班级，避免出现没有任何班级关系的孤立老师档案。正式接入 Supabase Auth 后，这里会用于根据邮箱发送邀请链接。
-          </p>
-
-          <div className="mt-5 rounded-2xl bg-white p-4 text-sm text-stone-600">
-            <p className="font-semibold text-emerald-950">
-              当前状态：暂未接入账号创建
-            </p>
-
-            <div className="mt-3 space-y-2 leading-7">
-              <p>1. 班级管理导入分班表时，系统自动创建小老师档案。</p>
-              <p>2. 小老师必须通过 class_teachers 关系绑定到班级。</p>
-              <p>3. 之后系统根据邮箱发送注册邀请。</p>
-              <p>4. 小老师自己设置密码，不由管理员手动保存密码。</p>
-              <p>5. 登录账号生成后，写入 teachers.auth_user_id。</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+    <AdminGuard>
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-7xl">
+          <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div>
-              <h2 className="text-xl font-bold text-emerald-950">
-                小老师列表
-              </h2>
+              <p className="text-sm font-semibold text-[#2f5d50]">
+                Admin / 小老师管理
+              </p>
 
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                默认显示在任小老师。选择具体届别后，可以查看该届相关小老师，包括已归档成员。
+              <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+                小老师管理
+              </h1>
+
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
+                小老师由班级管理中的分班导入自动创建。这里用于查看小老师、核对负责班级、处理账号绑定和删除错建资料。
               </p>
             </div>
 
-            <div className="flex flex-col gap-2 md:flex-row md:items-center">
-              <select
-                value={selectedTeacherView}
-                onChange={(event) => setSelectedTeacherView(event.target.value)}
-                className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-64"
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/admin"
+                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
               >
-                <option value="current">在任小老师</option>
-                {cohorts.map((cohort) => (
-                  <option key={cohort.id} value={cohort.id}>
-                    {cohort.name}
-                  </option>
-                ))}
-              </select>
-
-              <input
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                placeholder="搜索小老师、班级、邮箱..."
-                className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-80"
-              />
-
-              <button
-                onClick={() => setIsTeacherListOpen((prev) => !prev)}
-                className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-              >
-                {isTeacherListOpen ? "收起列表" : "展开列表"}
-              </button>
+                返回管理员首页
+              </Link>
             </div>
           </div>
 
-          {!isTeacherListOpen ? (
-            <div className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
-              小老师列表已收起。当前共有 {filteredTeachers.length} 位符合条件的小老师。
-            </div>
-          ) : isLoading ? (
-            <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
-              正在读取小老师数据...
-            </p>
-          ) : filteredTeachers.length === 0 ? (
-            <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
-              暂时没有找到符合条件的小老师。
-            </p>
-          ) : (
-            <div className="mt-6 overflow-x-auto rounded-2xl border border-emerald-100">
-              <table className="w-full min-w-[1050px] border-collapse bg-white text-left text-sm">
-                <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">小老师</th>
-                    <th className="px-4 py-3 font-semibold">负责班级</th>
-                    <th className="px-4 py-3 font-semibold">学生</th>
-                    <th className="px-4 py-3 font-semibold">课程</th>
-                    <th className="px-4 py-3 font-semibold">近 4 周</th>
-                    <th className="px-4 py-3 font-semibold">最近上课</th>
-                    <th className="px-4 py-3 font-semibold">状态</th>
-                    <th className="px-4 py-3 font-semibold">账号</th>
-                    <th className="px-4 py-3 font-semibold">操作</th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-emerald-50">
-                  {filteredTeachers.map((teacher) => (
-                    <tr key={teacher.id} className="align-top">
-                      <td className="px-4 py-4">
-                        <p className="font-bold text-emerald-950">
-                          {teacher.name}
-                        </p>
-                        <p className="mt-1 text-xs text-stone-500">
-                          {teacher.email || "暂未填写邮箱"}
-                        </p>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        {teacher.classDescriptions.length === 0 ? (
-                          <p className="text-sm text-red-500">
-                            暂未分配班级
-                          </p>
-                        ) : (
-                          <div className="space-y-1">
-                            {teacher.classDescriptions.map((description) => (
-                              <p
-                                key={description}
-                                className="rounded-full bg-[#fffdf4] px-3 py-1 text-xs text-stone-600"
-                              >
-                                {description}
-                              </p>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <p className="font-semibold text-emerald-950">
-                          {teacher.studentCount}
-                        </p>
-                        <p className="mt-1 text-xs text-stone-500">名学生</p>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <p className="font-semibold text-emerald-950">
-                          {teacher.lessonCount}
-                        </p>
-                        <p className="mt-1 text-xs text-stone-500">
-                          {formatHours(teacher.totalMinutes)} 小时
-                        </p>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <p className="font-semibold text-emerald-950">
-                          {teacher.recentFourWeeksCount}/4 周
-                        </p>
-                        <p className="mt-1 text-xs text-stone-500">
-                          暂不判断是否需关注
-                        </p>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <p className="text-sm text-stone-700">
-                          {teacher.recentLessonDate || "暂无记录"}
-                        </p>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getTeacherStatusClassName(
-                            teacher.status
-                          )}`}
-                        >
-                          {getTeacherStatusLabel(teacher.status)}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            teacher.authUserId
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-stone-100 text-stone-500"
-                          }`}
-                        >
-                          {teacher.authUserId ? "已绑定" : "未绑定"}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <div className="flex flex-col gap-2">
-                          <Link
-                            href={`/admin/teachers/${teacher.id}`}
-                            className="rounded-full border border-emerald-700 px-3 py-1.5 text-center text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                          >
-                            查看详情
-                          </Link>
-
-                          {teacher.status !== "archived" &&
-                            teacher.status !== "delete_requested" && (
-                              <button
-                                onClick={() =>
-                                  handleRequestDeleteTeacher(
-                                    teacher.id,
-                                    teacher.name
-                                  )
-                                }
-                                className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-                              >
-                                删除申请
-                              </button>
-                            )}
-
-                          {teacher.status === "delete_requested" && (
-                            <p className="text-xs text-red-500">等待确认</p>
-                          )}
-
-                          {teacher.status === "archived" && (
-                            <p className="text-xs text-stone-500">
-                              已归档，不可修改
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {message && (
+            <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+              {message}
             </div>
           )}
-        </section>
 
-        <section
-          id="danger-zone"
-          className="mt-10 rounded-[1.75rem] border border-red-100 bg-white p-5 shadow-sm md:p-6"
-        >
-          <h2 className="text-xl font-bold text-emerald-950">高风险操作</h2>
+          <section className="grid gap-4 md:grid-cols-4">
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <p className="text-sm text-stone-500">在任小老师</p>
+              <p className="mt-2 text-3xl font-bold text-emerald-950">
+                {currentTeacherCount}
+              </p>
+            </div>
 
-          <p className="mt-2 text-sm leading-7 text-stone-600">
-            这里仅处理单个小老师的删除申请。整届归档请在班级管理中通过“学年结束与整届封存”统一完成。
-            同一位管理员不能重复确认同一项申请。
-          </p>
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <p className="text-sm text-stone-500">已归档小老师</p>
+              <p className="mt-2 text-3xl font-bold text-emerald-950">
+                {archivedTeacherCount}
+              </p>
+            </div>
 
-          <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
-            <p className="font-semibold text-emerald-950">当前确认管理员</p>
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <p className="text-sm text-stone-500">未绑定账号</p>
+              <p className="mt-2 text-3xl font-bold text-emerald-950">
+                {unboundTeacherCount}
+              </p>
+              <p className="mt-1 text-xs text-stone-500">
+                账号系统接入后会逐步减少
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <p className="text-sm text-stone-500">课程记录</p>
+              <p className="mt-2 text-3xl font-bold text-emerald-950">
+                {totalLessonCount}
+              </p>
+            </div>
+          </section>
+
+          <section className="mt-6 rounded-[1.75rem] border border-dashed border-emerald-200 bg-[#fffdf4] p-5 shadow-sm md:p-6">
+            <h2 className="text-xl font-bold text-emerald-950">
+              邮件邀请注册 / 账号绑定
+            </h2>
 
             <p className="mt-2 text-sm leading-7 text-stone-600">
-              现在还没有正式登录系统，所以先用管理员姓名模拟。之后接入 Auth 后，会自动使用当前登录管理员账号。
+              小老师资料应该先通过班级管理导入并绑定到具体班级，避免出现没有任何班级关系的孤立老师档案。正式接入 Supabase Auth 后，这里会用于根据邮箱发送邀请链接。
             </p>
 
-            <input
-              value={currentAdminName}
-              onChange={(event) => setCurrentAdminName(event.target.value)}
-              placeholder="填写当前管理员姓名，例如 Ethan"
-              className="mt-3 w-full rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 md:w-96"
-            />
-          </div>
+            <div className="mt-5 rounded-2xl bg-white p-4 text-sm text-stone-600">
+              <p className="font-semibold text-emerald-950">
+                当前状态：暂未接入账号创建
+              </p>
 
-          <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
-            <p className="font-semibold text-emerald-950">待确认操作</p>
+              <div className="mt-3 space-y-2 leading-7">
+                <p>1. 班级管理导入分班表时，系统自动创建小老师档案。</p>
+                <p>2. 小老师必须通过 class_teachers 关系绑定到班级。</p>
+                <p>3. 之后系统根据邮箱发送注册邀请。</p>
+                <p>4. 小老师自己设置密码，不由管理员手动保存密码。</p>
+                <p>5. 登录账号生成后，写入 teachers.auth_user_id。</p>
+              </div>
+            </div>
+          </section>
 
-            {pendingRequests.length === 0 ? (
-              <p className="mt-3 text-sm text-stone-600">暂无待确认操作。</p>
+          <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+              <div>
+                <h2 className="text-xl font-bold text-emerald-950">
+                  小老师列表
+                </h2>
+
+                <p className="mt-2 text-sm leading-7 text-stone-600">
+                  默认显示在任小老师。选择具体届别后，可以查看该届相关小老师，包括已归档成员。
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <select
+                  value={selectedTeacherView}
+                  onChange={(event) => setSelectedTeacherView(event.target.value)}
+                  className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-64"
+                >
+                  <option value="current">在任小老师</option>
+                  {cohorts.map((cohort) => (
+                    <option key={cohort.id} value={cohort.id}>
+                      {cohort.name}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="搜索小老师、班级、邮箱..."
+                  className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-80"
+                />
+
+                <button
+                  onClick={() => setIsTeacherListOpen((prev) => !prev)}
+                  className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                >
+                  {isTeacherListOpen ? "收起列表" : "展开列表"}
+                </button>
+              </div>
+            </div>
+
+            {!isTeacherListOpen ? (
+              <div className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
+                小老师列表已收起。当前共有 {filteredTeachers.length} 位符合条件的小老师。
+              </div>
+            ) : isLoading ? (
+              <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
+                正在读取小老师数据...
+              </p>
+            ) : filteredTeachers.length === 0 ? (
+              <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
+                暂时没有找到符合条件的小老师。
+              </p>
             ) : (
-              <div className="mt-3 space-y-3">
-                {pendingRequests.map((request) => (
-                  <div key={request.id} className="rounded-2xl bg-white p-4">
-                    <p className="font-semibold text-emerald-950">
-                      {getActionLabel(request.action_type)}：
-                      {request.target_name}
-                    </p>
+              <div className="mt-6 overflow-x-auto rounded-2xl border border-emerald-100">
+                <table className="w-full min-w-[1050px] border-collapse bg-white text-left text-sm">
+                  <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">小老师</th>
+                      <th className="px-4 py-3 font-semibold">负责班级</th>
+                      <th className="px-4 py-3 font-semibold">学生</th>
+                      <th className="px-4 py-3 font-semibold">课程</th>
+                      <th className="px-4 py-3 font-semibold">近 4 周</th>
+                      <th className="px-4 py-3 font-semibold">最近上课</th>
+                      <th className="px-4 py-3 font-semibold">状态</th>
+                      <th className="px-4 py-3 font-semibold">账号</th>
+                      <th className="px-4 py-3 font-semibold">操作</th>
+                    </tr>
+                  </thead>
 
-                    <p className="mt-1 text-xs text-stone-500">
-                      已确认 {request.approvals_count}/
-                      {request.required_approvals}
-                    </p>
+                  <tbody className="divide-y divide-emerald-50">
+                    {filteredTeachers.map((teacher) => (
+                      <tr key={teacher.id} className="align-top">
+                        <td className="px-4 py-4">
+                          <p className="font-bold text-emerald-950">
+                            {teacher.name}
+                          </p>
+                          <p className="mt-1 text-xs text-stone-500">
+                            {teacher.email || "暂未填写邮箱"}
+                          </p>
+                        </td>
 
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handleApproveTeacherRequest(request)}
-                        className="rounded-full bg-[#2f5d50] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-900"
-                      >
-                        确认一次
-                      </button>
+                        <td className="px-4 py-4">
+                          {teacher.classDescriptions.length === 0 ? (
+                            <p className="text-sm text-red-500">
+                              暂未分配班级
+                            </p>
+                          ) : (
+                            <div className="space-y-1">
+                              {teacher.classDescriptions.map((description) => (
+                                <p
+                                  key={description}
+                                  className="rounded-full bg-[#fffdf4] px-3 py-1 text-xs text-stone-600"
+                                >
+                                  {description}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </td>
 
-                      <button
-                        onClick={() => handleCancelRequest(request)}
-                        className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-50"
-                      >
-                        撤回申请
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                        <td className="px-4 py-4">
+                          <p className="font-semibold text-emerald-950">
+                            {teacher.studentCount}
+                          </p>
+                          <p className="mt-1 text-xs text-stone-500">名学生</p>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <p className="font-semibold text-emerald-950">
+                            {teacher.lessonCount}
+                          </p>
+                          <p className="mt-1 text-xs text-stone-500">
+                            {formatHours(teacher.totalMinutes)} 小时
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <p className="font-semibold text-emerald-950">
+                            {teacher.recentFourWeeksCount}/4 周
+                          </p>
+                          <p className="mt-1 text-xs text-stone-500">
+                            暂不判断是否需关注
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <p className="text-sm text-stone-700">
+                            {teacher.recentLessonDate || "暂无记录"}
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getTeacherStatusClassName(
+                              teacher.status
+                            )}`}
+                          >
+                            {getTeacherStatusLabel(teacher.status)}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              teacher.authUserId
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-stone-100 text-stone-500"
+                            }`}
+                          >
+                            {teacher.authUserId ? "已绑定" : "未绑定"}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="flex flex-col gap-2">
+                            <Link
+                              href={`/admin/teachers/${teacher.id}`}
+                              className="rounded-full border border-emerald-700 px-3 py-1.5 text-center text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                            >
+                              查看详情
+                            </Link>
+
+                            {teacher.status !== "archived" &&
+                              teacher.status !== "delete_requested" && (
+                                <button
+                                  onClick={() =>
+                                    handleRequestDeleteTeacher(
+                                      teacher.id,
+                                      teacher.name
+                                    )
+                                  }
+                                  className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                                >
+                                  删除申请
+                                </button>
+                              )}
+
+                            {teacher.status === "delete_requested" && (
+                              <p className="text-xs text-red-500">等待确认</p>
+                            )}
+
+                            {teacher.status === "archived" && (
+                              <p className="text-xs text-stone-500">
+                                已归档，不可修改
+                              </p>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
-          </div>
+          </section>
+
+          <section
+            id="danger-zone"
+            className="mt-10 rounded-[1.75rem] border border-red-100 bg-white p-5 shadow-sm md:p-6"
+          >
+            <h2 className="text-xl font-bold text-emerald-950">高风险操作</h2>
+
+            <p className="mt-2 text-sm leading-7 text-stone-600">
+              这里仅处理单个小老师的删除申请。整届归档请在班级管理中通过“学年结束与整届封存”统一完成。
+              同一位管理员不能重复确认同一项申请。
+            </p>
+
+            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
+              <p className="font-semibold text-emerald-950">当前确认管理员</p>
+
+              <p className="mt-2 text-sm leading-7 text-stone-600">
+                现在还没有正式登录系统，所以先用管理员姓名模拟。之后接入 Auth 后，会自动使用当前登录管理员账号。
+              </p>
+
+              <input
+                value={currentAdminName}
+                onChange={(event) => setCurrentAdminName(event.target.value)}
+                placeholder="填写当前管理员姓名，例如 Ethan"
+                className="mt-3 w-full rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 md:w-96"
+              />
+            </div>
+
+            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
+              <p className="font-semibold text-emerald-950">待确认操作</p>
+
+              {pendingRequests.length === 0 ? (
+                <p className="mt-3 text-sm text-stone-600">暂无待确认操作。</p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {pendingRequests.map((request) => (
+                    <div key={request.id} className="rounded-2xl bg-white p-4">
+                      <p className="font-semibold text-emerald-950">
+                        {getActionLabel(request.action_type)}：
+                        {request.target_name}
+                      </p>
+
+                      <p className="mt-1 text-xs text-stone-500">
+                        已确认 {request.approvals_count}/
+                        {request.required_approvals}
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleApproveTeacherRequest(request)}
+                          className="rounded-full bg-[#2f5d50] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-900"
+                        >
+                          确认一次
+                        </button>
+
+                        <button
+                          onClick={() => handleCancelRequest(request)}
+                          className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-50"
+                        >
+                          撤回申请
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
         </section>
-      </section>
-    </main>
+      </main>
+    </AdminGuard>
   );
 }
