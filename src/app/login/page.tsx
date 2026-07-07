@@ -13,6 +13,7 @@ export default function LoginPage() {
 
   const [message, setMessage] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,7 +26,8 @@ export default function LoginPage() {
     setIsLoggingIn(false);
 
     if (result.role === "none") {
-      setMessage(result.message);
+    setMessage("账号或密码不正确，请重新检查。");
+    setIsLoading(false);
       return;
     }
 
@@ -33,7 +35,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f5e9] px-6 py-12 text-stone-800">
+    <main className="min-h-screen bg-[#f6f5e9] px-6 py-12 text-stone-800"> 
       <section className="mx-auto max-w-md">
         <Link
           href="/"
@@ -97,7 +99,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={isLoggingIn}
+              disabled={isLoading}
               className="w-full rounded-full bg-[#2f5d50] px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoggingIn ? "正在登录..." : "登录"}
