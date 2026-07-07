@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentStudent, logoutCurrentUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
+import StudentGuard from "@/components/StudentGuard";
 
 type StudentSession = {
   studentId: string;
@@ -335,232 +336,234 @@ export default function StudentLessonsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
-      <section className="mx-auto max-w-5xl">
-        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <p className="text-sm font-semibold text-[#2f5d50]">
-              ORP 课程记录
-            </p>
+    <StudentGuard>
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-5xl">
+          <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+            <div>
+              <p className="text-sm font-semibold text-[#2f5d50]">
+                ORP 课程记录
+              </p>
 
-            <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-              {student?.name || session.studentName} 的全部课程
-            </h1>
+              <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+                {student?.name || session.studentName} 的全部课程
+              </h1>
 
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里可以查看每一节课的内容、作业、下次计划、材料链接，也可以给小老师留言。
-            </p>
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
+                这里可以查看每一节课的内容、作业、下次计划、材料链接，也可以给小老师留言。
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/student"
+                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+              >
+                返回学习空间
+              </Link>
+
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-fit rounded-full border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-white"
+              >
+                退出登录
+              </button>
+            </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/student"
-              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-            >
-              返回学习空间
-            </Link>
+          {message && (
+            <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+              {message}
+            </div>
+          )}
 
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="w-fit rounded-full border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-white"
-            >
-              退出登录
-            </button>
-          </div>
-        </div>
+          <section className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+            {records.length === 0 ? (
+              <p className="rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
+                目前还没有课程记录。
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {records.map((record) => {
+                  const isExpanded = expandedLessonId === record.id;
+                  const isWritingComment = commentLessonId === record.id;
+                  const attendance = attendanceByLessonId.get(record.id);
+                  const lessonComments = commentsByLessonId.get(record.id) || [];
 
-        {message && (
-          <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-            {message}
-          </div>
-        )}
-
-        <section className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          {records.length === 0 ? (
-            <p className="rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-              目前还没有课程记录。
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {records.map((record) => {
-                const isExpanded = expandedLessonId === record.id;
-                const isWritingComment = commentLessonId === record.id;
-                const attendance = attendanceByLessonId.get(record.id);
-                const lessonComments = commentsByLessonId.get(record.id) || [];
-
-                return (
-                  <article
-                    key={record.id}
-                    className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-5"
-                  >
-                    <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                      <div>
-                        <p className="text-sm text-stone-500">
-                          {record.lesson_date} · {record.duration_minutes} 分钟
-                        </p>
-
-                        <h2 className="mt-2 text-xl font-bold text-emerald-950">
-                          {record.lesson_title}
-                        </h2>
-                      </div>
-
-                      <span
-                        className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${
-                          attendance
-                            ? attendance.is_present
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-red-50 text-red-700"
-                            : "bg-amber-50 text-amber-700"
-                        }`}
-                      >
-                        {attendance
-                          ? attendance.is_present
-                            ? "已出勤"
-                            : "缺勤"
-                          : "未记录出勤"}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedLessonId(isExpanded ? null : record.id)
-                        }
-                        className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                      >
-                        {isExpanded ? "收起详情" : "展开详情"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCommentLessonId(
-                            isWritingComment ? null : record.id
-                          );
-                          setCommentText("");
-                          setMessage("");
-                        }}
-                        className="rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900"
-                      >
-                        {isWritingComment ? "取消留言" : "给小老师留言"}
-                      </button>
-                    </div>
-
-                    {isExpanded && (
-                      <div className="mt-5 space-y-5">
+                  return (
+                    <article
+                      key={record.id}
+                      className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-5"
+                    >
+                      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
                         <div>
-                          <p className="text-sm font-semibold text-emerald-700">
-                            这节课学了什么
+                          <p className="text-sm text-stone-500">
+                            {record.lesson_date} · {record.duration_minutes} 分钟
                           </p>
 
-                          <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
-                            {record.lesson_content_and_feedback}
-                          </p>
+                          <h2 className="mt-2 text-xl font-bold text-emerald-950">
+                            {record.lesson_title}
+                          </h2>
                         </div>
 
-                        {record.homework && (
-                          <div>
-                            <p className="text-sm font-semibold text-emerald-700">
-                              课后小任务
-                            </p>
-
-                            <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
-                              {record.homework}
-                            </p>
-                          </div>
-                        )}
-
-                        {record.next_plan && (
-                          <div>
-                            <p className="text-sm font-semibold text-emerald-700">
-                              下次课预告
-                            </p>
-
-                            <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
-                              {record.next_plan}
-                            </p>
-                          </div>
-                        )}
-
-                        {record.material_link && (
-                          <div>
-                            <p className="text-sm font-semibold text-emerald-700">
-                              学习材料
-                            </p>
-
-                            <a
-                              href={record.material_link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-2 inline-block break-all text-sm font-semibold text-emerald-700 underline"
-                            >
-                              打开学习材料
-                            </a>
-                          </div>
-                        )}
-
-                        {lessonComments.length > 0 && (
-                          <div className="rounded-2xl border border-emerald-100 bg-white p-4">
-                            <p className="text-sm font-semibold text-emerald-700">
-                              我的留言
-                            </p>
-
-                            <div className="mt-3 space-y-2">
-                              {lessonComments.map((comment) => (
-                                <div
-                                  key={comment.id}
-                                  className="rounded-2xl bg-[#fffdf4] p-3"
-                                >
-                                  <p className="text-sm leading-7 text-stone-700">
-                                    {comment.comment}
-                                  </p>
-
-                                  <p className="mt-1 text-xs text-stone-500">
-                                    {comment.created_at.slice(0, 10)}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        <span
+                          className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${
+                            attendance
+                              ? attendance.is_present
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-red-50 text-red-700"
+                              : "bg-amber-50 text-amber-700"
+                          }`}
+                        >
+                          {attendance
+                            ? attendance.is_present
+                              ? "已出勤"
+                              : "缺勤"
+                            : "未记录出勤"}
+                        </span>
                       </div>
-                    )}
 
-                    {isWritingComment && (
-                      <div className="mt-5 rounded-2xl border border-emerald-100 bg-white p-4">
-                        <p className="text-sm font-semibold text-emerald-700">
-                          写一句留言
-                        </p>
-
-                        <textarea
-                          value={commentText}
-                          onChange={(event) =>
-                            setCommentText(event.target.value)
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedLessonId(isExpanded ? null : record.id)
                           }
-                          rows={4}
-                          placeholder="比如：今天我最喜欢的是…… / 我还有点不明白的是……"
-                          className="mt-3 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm leading-7 outline-none focus:border-emerald-500"
-                        />
+                          className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                        >
+                          {isExpanded ? "收起详情" : "展开详情"}
+                        </button>
 
                         <button
                           type="button"
-                          onClick={() => submitComment(record.id)}
-                          disabled={isSubmittingComment}
-                          className="mt-3 rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => {
+                            setCommentLessonId(
+                              isWritingComment ? null : record.id
+                            );
+                            setCommentText("");
+                            setMessage("");
+                          }}
+                          className="rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900"
                         >
-                          {isSubmittingComment ? "提交中..." : "提交留言"}
+                          {isWritingComment ? "取消留言" : "给小老师留言"}
                         </button>
                       </div>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          )}
+
+                      {isExpanded && (
+                        <div className="mt-5 space-y-5">
+                          <div>
+                            <p className="text-sm font-semibold text-emerald-700">
+                              这节课学了什么
+                            </p>
+
+                            <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
+                              {record.lesson_content_and_feedback}
+                            </p>
+                          </div>
+
+                          {record.homework && (
+                            <div>
+                              <p className="text-sm font-semibold text-emerald-700">
+                                课后小任务
+                              </p>
+
+                              <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
+                                {record.homework}
+                              </p>
+                            </div>
+                          )}
+
+                          {record.next_plan && (
+                            <div>
+                              <p className="text-sm font-semibold text-emerald-700">
+                                下次课预告
+                              </p>
+
+                              <p className="mt-2 whitespace-pre-line leading-8 text-stone-700">
+                                {record.next_plan}
+                              </p>
+                            </div>
+                          )}
+
+                          {record.material_link && (
+                            <div>
+                              <p className="text-sm font-semibold text-emerald-700">
+                                学习材料
+                              </p>
+
+                              <a
+                                href={record.material_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-2 inline-block break-all text-sm font-semibold text-emerald-700 underline"
+                              >
+                                打开学习材料
+                              </a>
+                            </div>
+                          )}
+
+                          {lessonComments.length > 0 && (
+                            <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+                              <p className="text-sm font-semibold text-emerald-700">
+                                我的留言
+                              </p>
+
+                              <div className="mt-3 space-y-2">
+                                {lessonComments.map((comment) => (
+                                  <div
+                                    key={comment.id}
+                                    className="rounded-2xl bg-[#fffdf4] p-3"
+                                  >
+                                    <p className="text-sm leading-7 text-stone-700">
+                                      {comment.comment}
+                                    </p>
+
+                                    <p className="mt-1 text-xs text-stone-500">
+                                      {comment.created_at.slice(0, 10)}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {isWritingComment && (
+                        <div className="mt-5 rounded-2xl border border-emerald-100 bg-white p-4">
+                          <p className="text-sm font-semibold text-emerald-700">
+                            写一句留言
+                          </p>
+
+                          <textarea
+                            value={commentText}
+                            onChange={(event) =>
+                              setCommentText(event.target.value)
+                            }
+                            rows={4}
+                            placeholder="比如：今天我最喜欢的是…… / 我还有点不明白的是……"
+                            className="mt-3 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm leading-7 outline-none focus:border-emerald-500"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => submitComment(record.id)}
+                            disabled={isSubmittingComment}
+                            className="mt-3 rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isSubmittingComment ? "提交中..." : "提交留言"}
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </section>
-      </section>
-    </main>
+      </main>
+    </StudentGuard>
   );
 }
