@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { getCurrentTeacher } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
+import TeacherGuard from "@/components/TeacherGuard";
 
 type TeacherSession = {
   teacherId: string;
@@ -337,139 +338,141 @@ export default function EditGoalPage() {
   const isCompleted = goal.status === "completed";
 
   return (
-    <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
-      <section className="mx-auto max-w-3xl">
-        <Link
-          href="/teacher"
-          className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
-        >
-          ← 返回首页
-        </Link>
+    <TeacherGuard>
+      <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+        <section className="mx-auto max-w-3xl">
+          <Link
+            href="/teacher"
+            className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+          >
+            ← 返回首页
+          </Link>
 
-        <div className="mt-8 rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
-          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-700">
-            Edit Goal
-          </p>
-
-          <h1 className="mt-3 text-4xl font-bold text-emerald-950">
-            修改教学目标
-          </h1>
-
-          <p className="mt-4 leading-8 text-stone-600">
-            当前小老师：
-            <span className="font-semibold text-emerald-800">
-              {teacherSession.teacherName}
-            </span>
-            。目标是教学计划，可以根据实际进度调整。已经关联到这个目标的授课记录不会被改变。
-          </p>
-
-          <div className="mt-6 rounded-2xl bg-[#f6f5e9] p-5">
-            <p className="text-sm text-stone-500">所属班级</p>
-            <p className="mt-1 text-xl font-bold text-emerald-950">
-              {teacherClass?.name || "未读取到班级"}
+          <div className="mt-8 rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-700">
+              Edit Goal
             </p>
 
-            <p className="mt-4 text-sm text-stone-500">当前已完成课次</p>
-            <p className="mt-1 text-2xl font-bold text-emerald-950">
-              {completedLessons} 节
+            <h1 className="mt-3 text-4xl font-bold text-emerald-950">
+              修改教学目标
+            </h1>
+
+            <p className="mt-4 leading-8 text-stone-600">
+              当前小老师：
+              <span className="font-semibold text-emerald-800">
+                {teacherSession.teacherName}
+              </span>
+              。目标是教学计划，可以根据实际进度调整。已经关联到这个目标的授课记录不会被改变。
             </p>
 
-            <p className="mt-2 text-sm leading-6 text-stone-500">
-              修改后的计划课次不能少于这个数字。
-            </p>
-          </div>
-
-          {isCompleted ? (
-            <div className="mt-8 rounded-2xl border border-stone-200 bg-stone-50 p-6">
-              <p className="font-semibold text-stone-700">
-                这个目标已经结束，暂时不能修改。
+            <div className="mt-6 rounded-2xl bg-[#f6f5e9] p-5">
+              <p className="text-sm text-stone-500">所属班级</p>
+              <p className="mt-1 text-xl font-bold text-emerald-950">
+                {teacherClass?.name || "未读取到班级"}
               </p>
 
-              <p className="mt-2 leading-7 text-stone-500">
-                已结束目标属于历史归档。之后如果确实需要调整，可以交给管理员手动处理。
+              <p className="mt-4 text-sm text-stone-500">当前已完成课次</p>
+              <p className="mt-1 text-2xl font-bold text-emerald-950">
+                {completedLessons} 节
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-stone-500">
+                修改后的计划课次不能少于这个数字。
               </p>
             </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="mt-8 space-y-7">
-              <div>
-                <label className="text-sm font-semibold text-stone-700">
-                  目标标题 <span className="text-red-500">*</span>
-                </label>
 
-                <input
-                  name="title"
-                  defaultValue={goal.title}
-                  className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
-                />
+            {isCompleted ? (
+              <div className="mt-8 rounded-2xl border border-stone-200 bg-stone-50 p-6">
+                <p className="font-semibold text-stone-700">
+                  这个目标已经结束，暂时不能修改。
+                </p>
+
+                <p className="mt-2 leading-7 text-stone-500">
+                  已结束目标属于历史归档。之后如果确实需要调整，可以交给管理员手动处理。
+                </p>
               </div>
-
-              <div>
-                <label className="text-sm font-semibold text-stone-700">
-                  目标说明
-                </label>
-
-                <textarea
-                  name="description"
-                  rows={5}
-                  defaultValue={goal.description || ""}
-                  className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="grid gap-5 md:grid-cols-2">
+            ) : (
+              <form onSubmit={handleSubmit} className="mt-8 space-y-7">
                 <div>
                   <label className="text-sm font-semibold text-stone-700">
-                    开始日期
+                    目标标题 <span className="text-red-500">*</span>
                   </label>
 
                   <input
-                    type="text"
-                    value={goal.start_date || "未设置"}
-                    readOnly
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-stone-100 px-4 py-3 text-stone-500 outline-none"
-                  />
-
-                  <p className="mt-2 text-sm text-stone-500">
-                    开始日期是目标创建时的记录，不能在这里修改。
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-stone-700">
-                    计划课次 <span className="text-red-500">*</span>
-                  </label>
-
-                  <input
-                    type="number"
-                    name="expected_lessons"
-                    min={Math.max(1, completedLessons)}
-                    defaultValue={goal.expected_lessons || ""}
+                    name="title"
+                    defaultValue={goal.title}
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
                   />
-
-                  <p className="mt-2 text-sm text-stone-500">
-                    不能少于当前已完成的 {completedLessons} 节。
-                  </p>
                 </div>
-              </div>
 
-              {message && (
-                <p className="rounded-xl bg-[#f6f5e9] px-4 py-3 text-sm font-semibold text-emerald-800">
-                  {message}
-                </p>
-              )}
+                <div>
+                  <label className="text-sm font-semibold text-stone-700">
+                    目标说明
+                  </label>
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="rounded-full bg-[#2f5d50] px-6 py-3 font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSubmitting ? "保存中..." : "保存修改"}
-              </button>
-            </form>
-          )}
-        </div>
-      </section>
-    </main>
+                  <textarea
+                    name="description"
+                    rows={5}
+                    defaultValue={goal.description || ""}
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="grid gap-5 md:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      开始日期
+                    </label>
+
+                    <input
+                      type="text"
+                      value={goal.start_date || "未设置"}
+                      readOnly
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-stone-100 px-4 py-3 text-stone-500 outline-none"
+                    />
+
+                    <p className="mt-2 text-sm text-stone-500">
+                      开始日期是目标创建时的记录，不能在这里修改。
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      计划课次 <span className="text-red-500">*</span>
+                    </label>
+
+                    <input
+                      type="number"
+                      name="expected_lessons"
+                      min={Math.max(1, completedLessons)}
+                      defaultValue={goal.expected_lessons || ""}
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                    />
+
+                    <p className="mt-2 text-sm text-stone-500">
+                      不能少于当前已完成的 {completedLessons} 节。
+                    </p>
+                  </div>
+                </div>
+
+                {message && (
+                  <p className="rounded-xl bg-[#f6f5e9] px-4 py-3 text-sm font-semibold text-emerald-800">
+                    {message}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="rounded-full bg-[#2f5d50] px-6 py-3 font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSubmitting ? "保存中..." : "保存修改"}
+                </button>
+              </form>
+            )}
+          </div>
+        </section>
+      </main>
+    </TeacherGuard>
   );
 }

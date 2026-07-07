@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { getCurrentTeacher } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
+import TeacherGuard from "@/components/TeacherGuard";
 
 type TeacherSession = {
   teacherId: string;
@@ -357,283 +358,285 @@ export default function NewRecordPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-8">
-          <Link
-            href="/teacher"
-            className="text-sm font-semibold text-emerald-800 hover:text-emerald-950"
-          >
-            ← 返回小老师主页
-          </Link>
+    <TeacherGuard>
+      <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+        <div className="mx-auto max-w-4xl">
+          <div className="mb-8">
+            <Link
+              href="/teacher"
+              className="text-sm font-semibold text-emerald-800 hover:text-emerald-950"
+            >
+              ← 返回小老师主页
+            </Link>
 
-          <h1 className="mt-3 text-4xl font-bold text-emerald-950">
-            添加授课记录
-          </h1>
+            <h1 className="mt-3 text-4xl font-bold text-emerald-950">
+              添加授课记录
+            </h1>
 
-          <p className="mt-4 leading-8 text-stone-600">
-            当前小老师：
-            <span className="font-semibold text-emerald-800">
-              {teacherSession.teacherName}
-            </span>
-            。请记录本节课的基本信息、出勤情况、课程内容和后续计划。
-          </p>
+            <p className="mt-4 leading-8 text-stone-600">
+              当前小老师：
+              <span className="font-semibold text-emerald-800">
+                {teacherSession.teacherName}
+              </span>
+              。请记录本节课的基本信息、出勤情况、课程内容和后续计划。
+            </p>
 
-          {message && (
-            <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-800">
-              {message}
-            </div>
-          )}
-        </div>
-
-        <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
-          <form onSubmit={handleSubmit} className="space-y-7">
-            <section>
-              <h2 className="text-2xl font-bold text-emerald-950">
-                基本信息
-              </h2>
-
-              <div className="mt-5 grid gap-5 md:grid-cols-2">
-                <div>
-                  <label className="text-sm font-semibold text-stone-700">
-                    所属班级
-                  </label>
-
-                  <input
-                    type="text"
-                    value={selectedClass?.name || "未读取到班级"}
-                    readOnly
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-stone-100 px-4 py-3 text-stone-600 outline-none"
-                  />
-
-                  <p className="mt-2 text-xs leading-5 text-stone-500">
-                    班级根据当前登录的小老师账号自动读取。当前版本按一个小老师对应一个班级处理。
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-stone-700">
-                    所属课程目标
-                  </label>
-
-                  <select
-                    name="goal_id"
-                    disabled={isLoadingClassData}
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <option value="">
-                      {isLoadingClassData
-                        ? "正在读取教学目标..."
-                        : "不关联教学目标"}
-                    </option>
-
-                    {goals.map((goal) => (
-                      <option key={goal.id} value={goal.id}>
-                        {goal.title}
-                        {goal.expected_lessons
-                          ? `（计划 ${goal.expected_lessons} 节）`
-                          : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-stone-700">
-                    上课日期
-                  </label>
-
-                  <input
-                    type="date"
-                    name="lesson_date"
-                    defaultValue={today}
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
-                  />
-
-                  <p className="mt-2 text-xs leading-5 text-stone-500">
-                    默认是今天，也可以手动修改为实际上课日期。
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-stone-700">
-                    授课时长（分钟）
-                  </label>
-
-                  <input
-                    type="number"
-                    name="duration_minutes"
-                    defaultValue={40}
-                    placeholder="例如：40"
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-sm font-semibold text-stone-700">
-                    本节课主题
-                  </label>
-
-                  <input
-                    type="text"
-                    name="lesson_title"
-                    placeholder="例如：小王子第一章 / 自我介绍与阅读导入"
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
-                  />
-                </div>
+            {message && (
+              <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-800">
+                {message}
               </div>
-            </section>
+            )}
+          </div>
 
-            <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-bold text-emerald-950">学生出勤</h2>
+          <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
+            <form onSubmit={handleSubmit} className="space-y-7">
+              <section>
+                <h2 className="text-2xl font-bold text-emerald-950">
+                  基本信息
+                </h2>
 
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                默认全部出勤。如果有学生没有参加本节课，请取消勾选。
-              </p>
-
-              {students.length === 0 ? (
-                <p className="mt-4 rounded-2xl bg-[#fffdf4] p-4 text-sm text-stone-600">
-                  当前班级还没有录入学生，暂时无法记录出勤。
-                </p>
-              ) : (
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  {students.map((student) => (
-                    <label
-                      key={student.id}
-                      className="flex cursor-pointer items-center justify-between rounded-2xl bg-[#fffdf4] p-4 text-sm"
-                    >
-                      <div>
-                        <p className="font-semibold text-emerald-950">
-                          {student.name}
-                        </p>
-
-                        <p className="mt-1 text-xs text-stone-500">
-                          {student.note || "暂无备注"}
-                        </p>
-                      </div>
-
-                      <input
-                        type="checkbox"
-                        checked={attendanceMap[student.id] ?? false}
-                        onChange={(event) => {
-                          setAttendanceMap((previousMap) => ({
-                            ...previousMap,
-                            [student.id]: event.target.checked,
-                          }));
-                        }}
-                        className="h-4 w-4"
-                      />
-                    </label>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="border-t border-emerald-100 pt-7">
-              <h2 className="text-2xl font-bold text-emerald-950">
-                课程内容与课后安排
-              </h2>
-
-              <div className="mt-5 space-y-5">
-                <div>
-                  <label className="text-sm font-semibold text-stone-700">
-                    本节课内容与课堂反馈
-                  </label>
-
-                  <textarea
-                    name="lesson_content_and_feedback"
-                    rows={6}
-                    placeholder="记录本节课讲了什么、学生整体理解情况、互动情况、哪里做得好、哪里需要继续练习。"
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div className="grid gap-5 md:grid-cols-2">
+                <div className="mt-5 grid gap-5 md:grid-cols-2">
                   <div>
                     <label className="text-sm font-semibold text-stone-700">
-                      课后作业（选填）
+                      所属班级
                     </label>
 
-                    <textarea
-                      name="homework"
-                      rows={3}
-                      placeholder="例如：复习关键词，完成一段复述。"
-                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                    <input
+                      type="text"
+                      value={selectedClass?.name || "未读取到班级"}
+                      readOnly
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-stone-100 px-4 py-3 text-stone-600 outline-none"
                     />
-                  </div>
 
-                  <div>
-                    <label className="text-sm font-semibold text-stone-700">
-                      下节课计划（选填）
-                    </label>
-
-                    <textarea
-                      name="next_plan"
-                      rows={3}
-                      placeholder="例如：继续阅读下一章，加入开放式问题。"
-                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-stone-700">
-                    视频 / 材料链接（选填）
-                  </label>
-
-                  <input
-                    type="url"
-                    name="material_link"
-                    placeholder="https://..."
-                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-            </section>
-
-            <section className="border-t border-emerald-100 pt-7">
-              <div className="rounded-2xl border border-emerald-100 bg-[#edf3df] p-5">
-                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                  <div>
-                    <h2 className="text-2xl font-bold text-emerald-950">
-                      小老师反思（私密）
-                    </h2>
-
-                    <p className="mt-2 leading-7 text-stone-600">
-                      这部分只对小老师本人和管理员可见，不会显示给学生。
+                    <p className="mt-2 text-xs leading-5 text-stone-500">
+                      班级根据当前登录的小老师账号自动读取。当前版本按一个小老师对应一个班级处理。
                     </p>
                   </div>
 
-                  <span className="w-fit rounded-full bg-white px-4 py-2 text-sm font-semibold text-emerald-800">
-                    私密
-                  </span>
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      所属课程目标
+                    </label>
+
+                    <select
+                      name="goal_id"
+                      disabled={isLoadingClassData}
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <option value="">
+                        {isLoadingClassData
+                          ? "正在读取教学目标..."
+                          : "不关联教学目标"}
+                      </option>
+
+                      {goals.map((goal) => (
+                        <option key={goal.id} value={goal.id}>
+                          {goal.title}
+                          {goal.expected_lessons
+                            ? `（计划 ${goal.expected_lessons} 节）`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      上课日期
+                    </label>
+
+                    <input
+                      type="date"
+                      name="lesson_date"
+                      defaultValue={today}
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                    />
+
+                    <p className="mt-2 text-xs leading-5 text-stone-500">
+                      默认是今天，也可以手动修改为实际上课日期。
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      授课时长（分钟）
+                    </label>
+
+                    <input
+                      type="number"
+                      name="duration_minutes"
+                      defaultValue={40}
+                      placeholder="例如：40"
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-semibold text-stone-700">
+                      本节课主题
+                    </label>
+
+                    <input
+                      type="text"
+                      name="lesson_title"
+                      placeholder="例如：小王子第一章 / 自我介绍与阅读导入"
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                    />
+                  </div>
                 </div>
+              </section>
 
-                <textarea
-                  name="teacher_reflection"
-                  rows={4}
-                  placeholder="例如：这节课哪里顺利？哪里需要调整？下次如何改进？有没有需要管理员或课程部帮助的地方？"
-                  className="mt-5 w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 leading-7 outline-none focus:border-emerald-500"
-                />
+              <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+                <h2 className="text-lg font-bold text-emerald-950">学生出勤</h2>
+
+                <p className="mt-2 text-sm leading-7 text-stone-600">
+                  默认全部出勤。如果有学生没有参加本节课，请取消勾选。
+                </p>
+
+                {students.length === 0 ? (
+                  <p className="mt-4 rounded-2xl bg-[#fffdf4] p-4 text-sm text-stone-600">
+                    当前班级还没有录入学生，暂时无法记录出勤。
+                  </p>
+                ) : (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {students.map((student) => (
+                      <label
+                        key={student.id}
+                        className="flex cursor-pointer items-center justify-between rounded-2xl bg-[#fffdf4] p-4 text-sm"
+                      >
+                        <div>
+                          <p className="font-semibold text-emerald-950">
+                            {student.name}
+                          </p>
+
+                          <p className="mt-1 text-xs text-stone-500">
+                            {student.note || "暂无备注"}
+                          </p>
+                        </div>
+
+                        <input
+                          type="checkbox"
+                          checked={attendanceMap[student.id] ?? false}
+                          onChange={(event) => {
+                            setAttendanceMap((previousMap) => ({
+                              ...previousMap,
+                              [student.id]: event.target.checked,
+                            }));
+                          }}
+                          className="h-4 w-4"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="border-t border-emerald-100 pt-7">
+                <h2 className="text-2xl font-bold text-emerald-950">
+                  课程内容与课后安排
+                </h2>
+
+                <div className="mt-5 space-y-5">
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      本节课内容与课堂反馈
+                    </label>
+
+                    <textarea
+                      name="lesson_content_and_feedback"
+                      rows={6}
+                      placeholder="记录本节课讲了什么、学生整体理解情况、互动情况、哪里做得好、哪里需要继续练习。"
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-semibold text-stone-700">
+                        课后作业（选填）
+                      </label>
+
+                      <textarea
+                        name="homework"
+                        rows={3}
+                        placeholder="例如：复习关键词，完成一段复述。"
+                        className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-semibold text-stone-700">
+                        下节课计划（选填）
+                      </label>
+
+                      <textarea
+                        name="next_plan"
+                        rows={3}
+                        placeholder="例如：继续阅读下一章，加入开放式问题。"
+                        className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      视频 / 材料链接（选填）
+                    </label>
+
+                    <input
+                      type="url"
+                      name="material_link"
+                      placeholder="https://..."
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="border-t border-emerald-100 pt-7">
+                <div className="rounded-2xl border border-emerald-100 bg-[#edf3df] p-5">
+                  <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                    <div>
+                      <h2 className="text-2xl font-bold text-emerald-950">
+                        小老师反思（私密）
+                      </h2>
+
+                      <p className="mt-2 leading-7 text-stone-600">
+                        这部分只对小老师本人和管理员可见，不会显示给学生。
+                      </p>
+                    </div>
+
+                    <span className="w-fit rounded-full bg-white px-4 py-2 text-sm font-semibold text-emerald-800">
+                      私密
+                    </span>
+                  </div>
+
+                  <textarea
+                    name="teacher_reflection"
+                    rows={4}
+                    placeholder="例如：这节课哪里顺利？哪里需要调整？下次如何改进？有没有需要管理员或课程部帮助的地方？"
+                    className="mt-5 w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </section>
+
+              <div className="flex flex-col gap-3 border-t border-emerald-100 pt-6 md:flex-row md:items-center md:justify-between">
+                <p className="text-sm leading-6 text-stone-500">
+                  当前版本会根据登录的小老师账号，自动保存真实 teacher_id、class_id 和学生出勤。
+                </p>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !selectedClassId}
+                  className="rounded-full bg-[#cfe8d6] px-7 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSubmitting ? "保存中..." : "保存记录"}
+                </button>
               </div>
-            </section>
-
-            <div className="flex flex-col gap-3 border-t border-emerald-100 pt-6 md:flex-row md:items-center md:justify-between">
-              <p className="text-sm leading-6 text-stone-500">
-                当前版本会根据登录的小老师账号，自动保存真实 teacher_id、class_id 和学生出勤。
-              </p>
-
-              <button
-                type="submit"
-                disabled={isSubmitting || !selectedClassId}
-                className="rounded-full bg-[#cfe8d6] px-7 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSubmitting ? "保存中..." : "保存记录"}
-              </button>
-            </div>
-          </form>
-        </section>
-      </div>
-    </main>
+            </form>
+          </section>
+        </div>
+      </main>
+    </TeacherGuard>
   );
 }
