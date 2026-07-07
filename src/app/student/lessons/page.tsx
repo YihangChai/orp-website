@@ -362,13 +362,6 @@ export default function StudentLessonsPage() {
                 返回学习空间
               </Link>
 
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="w-fit rounded-full border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-white"
-              >
-                退出登录
-              </button>
             </div>
           </div>
 
