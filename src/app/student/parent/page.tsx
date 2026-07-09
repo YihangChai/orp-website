@@ -179,6 +179,8 @@ function ParentModeContent() {
   async function submitParentMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    const form = event.currentTarget;
+
     if (!pageData) {
       setMessage("学生信息或班级信息尚未加载完成，请稍后再留言。");
       return;
@@ -187,34 +189,39 @@ function ParentModeContent() {
     setIsSubmittingMessage(true);
     setMessage("");
 
-    const formData = new FormData(event.currentTarget);
+    try {
+      const formData = new FormData(form);
 
-    const parentName = String(formData.get("parent_name") || "").trim();
-    const parentMessage = String(formData.get("message") || "").trim();
+      const parentName = String(formData.get("parent_name") || "").trim();
+      const parentMessage = String(formData.get("message") || "").trim();
 
-    if (!parentMessage) {
-      setMessage("留言内容不能为空。");
+      if (!parentMessage) {
+        setMessage("留言内容不能为空。");
+        return;
+      }
+
+      const { error } = await supabase.from("parent_messages").insert({
+        student_id: currentStudent.id,
+        student_name: pageData.student.name,
+        parent_name: parentName || `${pageData.student.name} 家长`,
+        class_id: pageData.classId,
+        message: parentMessage,
+      });
+
+      if (error) {
+        throw new Error(`提交留言失败：${error.message}`);
+      }
+
+      form.reset();
+      setMessage("留言已提交，感谢你的反馈。");
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "提交留言失败，请稍后再试。";
+
+      setMessage(errorMessage);
+    } finally {
       setIsSubmittingMessage(false);
-      return;
     }
-
-    const { error } = await supabase.from("parent_messages").insert({
-      student_id: currentStudent.id,
-      student_name: pageData.student.name,
-      parent_name: parentName || `${pageData.student.name} 家长`,
-      class_id: pageData.classId,
-      message: parentMessage,
-    });
-
-    if (error) {
-      setMessage(`提交留言失败：${error.message}`);
-      setIsSubmittingMessage(false);
-      return;
-    }
-
-    event.currentTarget.reset();
-    setMessage("留言已提交，感谢你的反馈。");
-    setIsSubmittingMessage(false);
   }
 
   const goals = pageData?.goals || [];
