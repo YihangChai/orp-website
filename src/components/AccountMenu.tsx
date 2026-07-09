@@ -289,11 +289,11 @@ export default function AccountMenu() {
             {account.role === "teacher" && (
               <>
                 <Link
-                  href="/teacher/new-record"
+                  href="/teacher"
                   onClick={() => setIsOpen(false)}
                   className="block rounded-xl px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-emerald-50 hover:text-emerald-900"
                 >
-                  新增课程记录
+                  我的主页
                 </Link>
               </>
             )}
