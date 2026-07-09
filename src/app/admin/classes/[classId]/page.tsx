@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import AdminGuard from "@/components/AdminGuard";
@@ -286,7 +286,9 @@ function AdminClassDetailContent() {
     }
 
     if (!classData) {
-      throw new Error("没有找到这个班级。这个班级可能已经被删除，或者链接里的 classId 不正确。");
+      throw new Error(
+        "没有找到这个班级。这个班级可能已经被删除，或者链接里的 classId 不正确。"
+      );
     }
 
     const [lessonResult, goalResult] = await Promise.all([
@@ -296,7 +298,8 @@ function AdminClassDetailContent() {
           "id, lesson_title, lesson_date, duration_minutes, lesson_content_and_feedback, homework, next_plan, teacher_reflection, created_at"
         )
         .eq("class_id", activeClassId)
-        .order("lesson_date", { ascending: false }),
+        .order("lesson_date", { ascending: false })
+        .order("created_at", { ascending: false }),
 
       supabase
         .from("teaching_goals")
@@ -328,10 +331,11 @@ function AdminClassDetailContent() {
         .in("lesson_record_id", lessonIds);
 
       if (attendanceError) {
-        throw new Error(`读取出勤记录失败：${attendanceError.message}`);
+        console.error("读取出勤记录失败：", attendanceError.message);
+        attendanceRecords = [];
+      } else {
+        attendanceRecords = (attendanceData || []) as AttendanceItem[];
       }
-
-      attendanceRecords = (attendanceData || []) as AttendanceItem[];
     }
 
     return {
@@ -446,9 +450,7 @@ function AdminClassDetailContent() {
 
   const teachingFrequency = getTeachingFrequencySummary(lessons);
 
-  const attendanceSummary = useMemo(() => {
-    return getAttendanceSummary(attendanceRecords, students);
-  }, [attendanceRecords, students]);
+  const attendanceSummary = getAttendanceSummary(attendanceRecords, students);
 
   /* =========================
      8. 页面渲染
@@ -661,7 +663,7 @@ function AdminClassDetailContent() {
                 </h2>
 
                 <p className="mt-2 text-sm leading-7 text-stone-600">
-                  根据课程记录中的学生出勤信息计算。若老师提交记录时没有填写出勤，则这里暂时没有数据。
+                  根据课程记录中的学生出勤信息计算。若老师提交记录时没有填写出勤，或当前出勤权限尚未开放，则这里暂时没有数据。
                 </p>
 
                 <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
