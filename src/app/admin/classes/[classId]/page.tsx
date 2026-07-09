@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import AdminGuard from "@/components/AdminGuard";
@@ -181,53 +181,84 @@ function getTeachingFrequencySummary(lessons: LessonRecordItem[]) {
   };
 }
 
-function getAttendanceSummary(
-  attendanceRecords: AttendanceItem[],
-  students: StudentItem[]
-) {
-  if (attendanceRecords.length === 0) {
-    return {
-      totalRecords: 0,
-      presentRecords: 0,
-      attendanceRate: null as number | null,
-      studentSummaries: [] as AttendanceStudentSummary[],
-    };
-  }
+  function getAttendanceSummary(
+    attendanceRecords: AttendanceItem[],
+    students: StudentItem[]
+  ) {
+    if (attendanceRecords.length === 0) {
+      return {
+        totalRecords: 0,
+        presentRecords: 0,
+        attendanceRate: null as number | null,
+        studentSummaries: [] as AttendanceStudentSummary[],
+      };
+    }
 
-  const presentRecords = attendanceRecords.filter(
-    (record) => record.is_present
-  ).length;
+    let presentRecords = 0;
 
-  const attendanceRate = Math.round(
-    (presentRecords / attendanceRecords.length) * 100
-  );
+    const studentSummaryMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        total: number;
+        present: number;
+      }
+    >();
 
-  const studentSummaries = students.map((student) => {
-    const records = attendanceRecords.filter(
-      (record) => record.student_id === student.id
+    students.forEach((student) => {
+      studentSummaryMap.set(student.id, {
+        id: student.id,
+        name: student.name,
+        total: 0,
+        present: 0,
+      });
+    });
+
+    attendanceRecords.forEach((record) => {
+      if (record.is_present) {
+        presentRecords += 1;
+      }
+
+      if (!record.student_id) return;
+
+      const studentSummary = studentSummaryMap.get(record.student_id);
+
+      if (!studentSummary) return;
+
+      studentSummary.total += 1;
+
+      if (record.is_present) {
+        studentSummary.present += 1;
+      }
+    });
+
+    const attendanceRate = Math.round(
+      (presentRecords / attendanceRecords.length) * 100
     );
 
-    const presentCount = records.filter((record) => record.is_present).length;
+    const studentSummaries = Array.from(studentSummaryMap.values()).map(
+      (student) => {
+        return {
+          id: student.id,
+          name: student.name,
+          total: student.total,
+          present: student.present,
+          rate:
+            student.total === 0
+              ? null
+              : Math.round((student.present / student.total) * 100),
+        };
+      }
+    );
 
     return {
-      id: student.id,
-      name: student.name,
-      total: records.length,
-      present: presentCount,
-      rate:
-        records.length === 0
-          ? null
-          : Math.round((presentCount / records.length) * 100),
+      totalRecords: attendanceRecords.length,
+      presentRecords,
+      attendanceRate,
+      studentSummaries,
     };
-  });
-
-  return {
-    totalRecords: attendanceRecords.length,
-    presentRecords,
-    attendanceRate,
-    studentSummaries,
-  };
-}
+  }
 
 /* =========================
    3. 页面外壳：只负责 AdminGuard
@@ -383,8 +414,60 @@ function AdminClassDetailContent() {
     };
   }, [classId]);
 
+    /* =========================
+     6. 派生数据：必须放在所有 return 之前
+     ========================= */
+
+  const classData = pageData?.classData || null;
+  const lessons = pageData?.lessons || [];
+  const goals = pageData?.goals || [];
+  const attendanceRecords = pageData?.attendanceRecords || [];
+
+  const teachers = useMemo(() => {
+    return (
+      classData?.class_teachers
+        ?.map((item) => item.teachers)
+        .filter((teacher): teacher is TeacherItem => Boolean(teacher)) || []
+    );
+  }, [classData]);
+
+  const students = useMemo(() => {
+    return (
+      classData?.class_students
+        ?.map((item) => item.students)
+        .filter((student): student is StudentItem => Boolean(student)) || []
+    );
+  }, [classData]);
+
+  const totalLessons = lessons.length;
+
+  const totalMinutes = useMemo(() => {
+    return lessons.reduce(
+      (sum, lesson) => sum + (lesson.duration_minutes || 0),
+      0
+    );
+  }, [lessons]);
+
+  const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
+
+  const activeGoals = useMemo(() => {
+    return goals.filter((goal) => goal.status === "active");
+  }, [goals]);
+
+  const completedGoals = useMemo(() => {
+    return goals.filter((goal) => goal.status === "completed");
+  }, [goals]);
+
+  const teachingFrequency = useMemo(() => {
+    return getTeachingFrequencySummary(lessons);
+  }, [lessons]);
+
+  const attendanceSummary = useMemo(() => {
+    return getAttendanceSummary(attendanceRecords, students);
+  }, [attendanceRecords, students]);
+
   /* =========================
-     6. 加载和错误状态
+     7. 加载和错误状态
      ========================= */
 
   if (isLoading) {
@@ -397,7 +480,7 @@ function AdminClassDetailContent() {
     );
   }
 
-  if (!pageData) {
+  if (!pageData || !classData) {
     return (
       <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
         <section className="mx-auto max-w-5xl rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm">
@@ -419,38 +502,6 @@ function AdminClassDetailContent() {
       </main>
     );
   }
-
-  /* =========================
-     7. 派生数据
-     ========================= */
-
-  const { classData, lessons, goals, attendanceRecords } = pageData;
-
-  const teachers =
-    classData.class_teachers
-      ?.map((item) => item.teachers)
-      .filter((teacher): teacher is TeacherItem => Boolean(teacher)) || [];
-
-  const students =
-    classData.class_students
-      ?.map((item) => item.students)
-      .filter((student): student is StudentItem => Boolean(student)) || [];
-
-  const totalLessons = lessons.length;
-
-  const totalMinutes = lessons.reduce(
-    (sum, lesson) => sum + (lesson.duration_minutes || 0),
-    0
-  );
-
-  const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
-
-  const activeGoals = goals.filter((goal) => goal.status === "active");
-  const completedGoals = goals.filter((goal) => goal.status === "completed");
-
-  const teachingFrequency = getTeachingFrequencySummary(lessons);
-
-  const attendanceSummary = getAttendanceSummary(attendanceRecords, students);
 
   /* =========================
      8. 页面渲染
