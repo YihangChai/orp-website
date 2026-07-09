@@ -1,26 +1,153 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { getCurrentStudent, type CurrentStudent } from "@/lib/auth";
 
 type StudentGuardProps = {
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
-export default function StudentGuard({ children }: StudentGuardProps) {
-  const [currentStudent, setCurrentStudent] = useState<CurrentStudent | null>(
-    null
+type StudentContextValue = {
+  currentStudent: CurrentStudent;
+};
+
+const StudentContext = createContext<StudentContextValue | null>(null);
+
+let cachedCurrentStudent: CurrentStudent | null = null;
+let currentStudentRequest: Promise<CurrentStudent | null> | null = null;
+
+function readSavedStudentSession() {
+  if (typeof window === "undefined") return null;
+
+  const rawSession = localStorage.getItem("orp_student_session");
+
+  if (!rawSession) return null;
+
+  try {
+    return JSON.parse(rawSession) as {
+      studentId?: string;
+      studentName?: string;
+      username?: string | null;
+      loggedInAt?: string;
+    };
+  } catch {
+    localStorage.removeItem("orp_student_session");
+    return null;
+  }
+}
+
+function getValidCachedStudent() {
+  if (typeof window === "undefined") return null;
+
+  const savedSession = readSavedStudentSession();
+
+  if (!savedSession?.studentId) return null;
+  if (!cachedCurrentStudent) return null;
+
+  if (cachedCurrentStudent.id !== savedSession.studentId) {
+    cachedCurrentStudent = null;
+    return null;
+  }
+
+  return cachedCurrentStudent;
+}
+
+function saveStudentSession(student: CurrentStudent) {
+  if (typeof window === "undefined") return;
+
+  localStorage.setItem(
+    "orp_student_session",
+    JSON.stringify({
+      studentId: student.id,
+      studentName: student.name,
+      username: student.username,
+      loggedInAt: new Date().toISOString(),
+    })
   );
-  const [isCheckingStudent, setIsCheckingStudent] = useState(true);
+}
+
+export function clearCurrentStudentCache() {
+  cachedCurrentStudent = null;
+  currentStudentRequest = null;
+
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("orp_student_session");
+  }
+}
+
+async function loadCurrentStudentOnce() {
+  const cachedStudent = getValidCachedStudent();
+
+  if (cachedStudent) {
+    return cachedStudent;
+  }
+
+  if (currentStudentRequest) {
+    return currentStudentRequest;
+  }
+
+  currentStudentRequest = getCurrentStudent()
+    .then((student) => {
+      if (!student) {
+        clearCurrentStudentCache();
+        return null;
+      }
+
+      cachedCurrentStudent = student;
+      saveStudentSession(student);
+
+      return student;
+    })
+    .finally(() => {
+      currentStudentRequest = null;
+    });
+
+  return currentStudentRequest;
+}
+
+export function useCurrentStudent() {
+  const context = useContext(StudentContext);
+
+  if (!context) {
+    throw new Error("useCurrentStudent must be used inside StudentGuard.");
+  }
+
+  return context.currentStudent;
+}
+
+export default function StudentGuard({ children }: StudentGuardProps) {
+  const initialCachedStudent = getValidCachedStudent();
+
+  const [currentStudent, setCurrentStudent] = useState<CurrentStudent | null>(
+    initialCachedStudent
+  );
+  const [isCheckingStudent, setIsCheckingStudent] = useState(
+    !initialCachedStudent
+  );
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    let isMounted = true;
+
     async function checkStudent() {
+      if (getValidCachedStudent()) {
+        setIsCheckingStudent(false);
+        return;
+      }
+
       setIsCheckingStudent(true);
       setMessage("");
 
-      const student = await getCurrentStudent();
+      const student = await loadCurrentStudentOnce();
+
+      if (!isMounted) return;
 
       if (!student) {
         setCurrentStudent(null);
@@ -34,6 +161,10 @@ export default function StudentGuard({ children }: StudentGuardProps) {
     }
 
     checkStudent();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   if (isCheckingStudent) {
@@ -69,5 +200,9 @@ export default function StudentGuard({ children }: StudentGuardProps) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <StudentContext.Provider value={{ currentStudent }}>
+      {children}
+    </StudentContext.Provider>
+  );
 }
