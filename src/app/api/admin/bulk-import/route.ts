@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildPreviewRows } from "@/lib/admin-import/buildPreviewRows";
 import { validateImportRows } from "@/lib/admin-import/validateImportRows";
+import { executeBulkImport } from "@/lib/admin-import/executeBulkImport";
 import type { ParsedImportRow } from "@/lib/admin-import/types";
 
 function getBearerToken(request: Request) {
@@ -86,21 +87,17 @@ export async function POST(request: Request) {
       );
     }
 
+    const result = await executeBulkImport(previewRows);
+
     return NextResponse.json({
-      message: "API 已经收到导入数据。下一步会接入真正的账号创建逻辑。",
+      message: "批量导入完成。",
       requestedBy: currentAdmin.name,
       receivedRows: previewRows.length,
-      preview: {
-        classCount: new Set(
-          previewRows.map(
-            (row) => `${row.cohortName}__${row.className}__${row.school}`
-          )
-        ).size,
-        teacherCount: new Set(previewRows.map((row) => row.teacherEmail)).size,
-        studentCount: previewRows.length,
-      },
+      result,
     });
   } catch (error) {
+    console.error("bulk-import API error:", error);
+
     const errorMessage =
       error instanceof Error ? error.message : "批量导入失败。";
 
