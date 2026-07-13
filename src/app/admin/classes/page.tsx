@@ -42,7 +42,7 @@ type AdminActionRequest = {
   note: string | null;
 };
 
-const TOTAL_ADMIN_COUNT = 4;
+const TOTAL_ADMIN_COUNT = 1;
 const DELETE_CLASS_REQUIRED_APPROVALS = 2;
 
 function normalizeName(name: string) {
@@ -882,9 +882,6 @@ function AdminClassesContent() {
               班级与分班管理
             </h1>
 
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里用于查看班级、核对成员、进入班级详情、修改班级基础信息，以及处理删除和封存流程。批量导入和账号创建已经迁移到独立导入页面。
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">

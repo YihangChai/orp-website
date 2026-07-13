@@ -210,7 +210,7 @@ async function getOrCreateTeacher(
       auth_user_id: authData.user.id,
       school_entering_year: Number(row.teacherEnteringYear),
       status: "active",
-      must_change_password: true,
+      must_change_password: false,
     })
     .select("id, name, email, auth_user_id, school_entering_year, status")
     .single();
@@ -306,7 +306,7 @@ async function getOrCreateStudent(
       auth_user_id: authData.user.id,
       grade: row.studentGrade.trim(),
       status: "active",
-      must_change_password: true,
+      must_change_password: false,
     })
     .select("id, name, username, auth_user_id, grade, status")
     .single();
