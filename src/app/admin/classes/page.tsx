@@ -918,26 +918,6 @@ function AdminClassesContent() {
           </div>
         )}
 
-        <section className="mb-6 rounded-[1.75rem] border border-dashed border-emerald-200 bg-white p-5 shadow-sm md:p-6">
-          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
-            <div>
-              <h2 className="text-xl font-bold text-emerald-950">
-                班级日常管理
-              </h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                新建班级、创建老师账号、创建学生账号、生成初始密码和绑定班级关系，请进入批量导入页面完成。本页只管理已经存在的班级。
-              </p>
-            </div>
-
-            <Link
-              href="/admin/import"
-              className="w-fit rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
-            >
-              前往批量导入
-            </Link>
-          </div>
-        </section>
 
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">

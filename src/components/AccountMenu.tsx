@@ -283,6 +283,15 @@ export default function AccountMenu() {
                 >
                   家长模式
                 </Link>
+
+                <Link
+                  href="/account/settings"
+                  onClick={() => setIsOpen(false)}
+                  className="block rounded-xl px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-emerald-50 hover:text-emerald-900"
+                >
+                  修改密码
+                </Link>
+
               </>
             )}
 
@@ -295,17 +304,37 @@ export default function AccountMenu() {
                 >
                   我的主页
                 </Link>
+
+                <Link
+                  href="/account/settings"
+                  onClick={() => setIsOpen(false)}
+                  className="block rounded-xl px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-emerald-50 hover:text-emerald-900"
+                >
+                  修改密码
+                </Link>
+
               </>
             )}
 
             {account.role === "admin" && (
-              <Link
-                href="/admin"
-                onClick={() => setIsOpen(false)}
-                className="block rounded-xl px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-emerald-50 hover:text-emerald-900"
-              >
-                管理后台
-              </Link>
+              <>
+                <Link
+                  href="/admin"
+                  onClick={() => setIsOpen(false)}
+                  className="block rounded-xl px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-emerald-50 hover:text-emerald-900"
+                >
+                  管理后台
+                </Link>
+                
+                <Link
+                  href="/account/settings"
+                  onClick={() => setIsOpen(false)}
+                  className="block rounded-xl px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-emerald-50 hover:text-emerald-900"
+                >
+                  修改密码
+                </Link>
+
+              </>
             )}
 
             <button
