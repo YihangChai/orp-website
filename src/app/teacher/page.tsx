@@ -84,7 +84,29 @@ type TeacherHomePageData = {
 };
 
 /* =========================
-   2. 页面外壳：只负责套 TeacherGuard
+   2. 工具函数
+   ========================= */
+
+function isActiveStudent(student: StudentRow) {
+  return student.status !== "withdrawn" && student.status !== "archived";
+}
+
+function isCurrentClass(classItem: ClassRow) {
+  return classItem.status === "active" && classItem.cohorts?.status === "active";
+}
+
+function uniqueStudentsById(students: StudentRow[]) {
+  const studentMap = new Map<string, StudentRow>();
+
+  students.forEach((student) => {
+    studentMap.set(student.id, student);
+  });
+
+  return Array.from(studentMap.values());
+}
+
+/* =========================
+   3. 页面外壳：只负责套 TeacherGuard
    ========================= */
 
 export default function TeacherPage() {
@@ -96,14 +118,10 @@ export default function TeacherPage() {
 }
 
 /* =========================
-   3. 页面主体：真正的小老师主页
+   4. 页面主体：真正的小老师主页
    ========================= */
 
 function TeacherHomeContent() {
-  /**
-   * currentTeacher 来自 TeacherGuard。
-   * 这里不会重新访问数据库确认老师身份。
-   */
   const currentTeacher = useCurrentTeacher();
 
   const [pageData, setPageData] = useState<TeacherHomePageData | null>(null);
@@ -112,23 +130,12 @@ function TeacherHomeContent() {
   const [message, setMessage] = useState("");
 
   /* =========================
-     4. 数据读取函数：读取老师主页需要的业务数据
+     5. 数据读取函数：读取老师主页需要的业务数据
      ========================= */
 
   async function loadTeacherHomePageData(
     activeTeacher: CurrentTeacher
   ): Promise<TeacherHomePageData> {
-    /**
-     * 第一次查询：
-     * 从 class_teachers 找到这个老师负责的班级。
-     * 同时嵌套读取：
-     * - classes 班级信息
-     * - cohorts 届别信息
-     * - class_students 班级学生关系
-     * - students 学生基本信息
-     *
-     * 这样就不需要再单独查一次 class_students。
-     */
     const { data: classTeacherData, error: classTeacherError } = await supabase
       .from("class_teachers")
       .select(
@@ -169,10 +176,6 @@ function TeacherHomeContent() {
       .map((relation) => relation.class_id)
       .filter(Boolean);
 
-    /**
-     * 把 nested select 里的班级学生关系整理成统一数组。
-     * 后面页面渲染“学生名单”和“每个班的学生”都会用这个数组。
-     */
     const studentsInClasses: StudentInClass[] = classRelations.flatMap(
       (relation) => {
         const classStudents = relation.classes?.class_students || [];
@@ -184,10 +187,6 @@ function TeacherHomeContent() {
       }
     );
 
-    /**
-     * 如果这个老师暂时没有分配班级：
-     * 后面的课程记录、教学目标都没有必要查。
-     */
     if (classIds.length === 0) {
       return {
         classRelations,
@@ -197,10 +196,6 @@ function TeacherHomeContent() {
       };
     }
 
-    /**
-     * 第二组查询：并行读取最近授课记录和当前教学目标。
-     * 这两个查询互不依赖，所以用 Promise.all 同时发出。
-     */
     const [lessonResult, goalsResult] = await Promise.all([
       supabase
         .from("lesson_records")
@@ -233,13 +228,6 @@ function TeacherHomeContent() {
     const teachingGoals = (goalsResult.data || []) as TeachingGoal[];
     const goalIds = teachingGoals.map((goal) => goal.id);
 
-    /**
-     * 第三次查询：
-     * 如果有正在进行的教学目标，就查这些目标下面已经有多少授课记录。
-     *
-     * 这里目前还需要单独查 lesson_records(id, goal_id)，
-     * 因为主页要显示每个目标的 completed_lessons。
-     */
     let lessonRecordsForGoals: { id: string; goal_id: string | null }[] = [];
 
     if (goalIds.length > 0) {
@@ -256,9 +244,6 @@ function TeacherHomeContent() {
         (progressData || []) as { id: string; goal_id: string | null }[];
     }
 
-    /**
-     * 在前端计算每个 goal 已完成几节课。
-     */
     const goalProgressMap = new Map<string, number>();
 
     lessonRecordsForGoals.forEach((record) => {
@@ -284,7 +269,7 @@ function TeacherHomeContent() {
   }
 
   /* =========================
-     5. 页面加载：currentTeacher 准备好后读取主页业务数据
+     6. 页面加载：currentTeacher 准备好后读取主页业务数据
      ========================= */
 
   useEffect(() => {
@@ -323,18 +308,13 @@ function TeacherHomeContent() {
   }, [currentTeacher]);
 
   /* =========================
-     6. 操作函数：结束一个教学目标
+     7. 操作函数：结束一个教学目标
      ========================= */
 
   async function completeGoal(goalId: string) {
     setIsCompletingGoal(true);
     setMessage("");
 
-    /**
-     * 这里仍然带上 teacher_id 条件。
-     * 即使前端传错 goalId，也只能更新当前老师自己的目标。
-     * 真正安全还要继续依赖 Supabase RLS。
-     */
     const { error } = await supabase
       .from("teaching_goals")
       .update({
@@ -351,11 +331,6 @@ function TeacherHomeContent() {
       return;
     }
 
-    /**
-     * 局部更新：
-     * 原来是结束目标后重新 fetchTeacherData() 全量重查。
-     * 现在只把这个目标从当前页面的 active goals 里移除。
-     */
     setPageData((currentPageData) => {
       if (!currentPageData) return currentPageData;
 
@@ -372,7 +347,7 @@ function TeacherHomeContent() {
   }
 
   /* =========================
-     7. 派生数据：把 pageData 整理成页面更好用的格式
+     8. 派生数据：把 pageData 整理成页面更好用的格式
      ========================= */
 
   const classRelations = pageData?.classRelations || [];
@@ -380,11 +355,29 @@ function TeacherHomeContent() {
   const lessonRecords = pageData?.lessonRecords || [];
   const goalsWithProgress = pageData?.goalsWithProgress || [];
 
+  /**
+   * classes:
+   * 老师所有绑定过的班级。
+   * 用于“我的班级”列表，可以包含历史/封存班级。
+   */
   const classes = useMemo(() => {
     return classRelations
       .map((relation) => relation.classes)
       .filter((classItem): classItem is ClassRow => Boolean(classItem));
   }, [classRelations]);
+
+  /**
+   * currentClasses:
+   * 当前有效班级。
+   * 用于左上角身份卡片。
+   */
+  const currentClasses = useMemo(() => {
+    return classes.filter((classItem) => isCurrentClass(classItem));
+  }, [classes]);
+
+  const currentClassIds = useMemo(() => {
+    return new Set(currentClasses.map((classItem) => classItem.id));
+  }, [currentClasses]);
 
   const classNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -398,20 +391,31 @@ function TeacherHomeContent() {
     return map;
   }, [classRelations]);
 
-  const activeStudents = useMemo(() => {
-    return studentsInClasses
+  /**
+   * currentStudents:
+   * 当前有效班级里的 active 学生。
+   * 只给左上角身份卡片使用。
+   */
+  const currentStudents = useMemo(() => {
+    const students = studentsInClasses
+      .filter((relation) => currentClassIds.has(relation.class_id))
       .map((relation) => relation.students)
       .filter((student): student is StudentRow => Boolean(student))
-      .filter((student) => student.status !== "withdrawn")
-      .filter((student) => student.status !== "archived");
-  }, [studentsInClasses]);
+      .filter((student) => isActiveStudent(student));
 
-  const studentNames = useMemo(() => {
-    return activeStudents.map((student) => student.name);
-  }, [activeStudents]);
+    return uniqueStudentsById(students);
+  }, [studentsInClasses, currentClassIds]);
+
+  const currentClassNames = useMemo(() => {
+    return currentClasses.map((classItem) => classItem.name);
+  }, [currentClasses]);
+
+  const currentStudentNames = useMemo(() => {
+    return currentStudents.map((student) => student.name);
+  }, [currentStudents]);
 
   /* =========================
-     8. 页面渲染
+     9. 页面渲染
      ========================= */
 
   return (
@@ -452,16 +456,20 @@ function TeacherHomeContent() {
               <div className="mt-6 space-y-3 border-t border-emerald-100 pt-5 text-sm leading-6 text-stone-600">
                 <p>
                   <span className="font-semibold text-stone-800">
-                    负责班级：
+                    当前负责班级：
                   </span>
-                  {classes.length > 0
-                    ? classes.map((classItem) => classItem.name).join("、")
-                    : "暂无班级"}
+                  {currentClassNames.length > 0
+                    ? currentClassNames.join("、")
+                    : "暂无当前班级"}
                 </p>
 
                 <p>
-                  <span className="font-semibold text-stone-800">学生：</span>
-                  {studentNames.length > 0 ? studentNames.join("、") : "暂无学生"}
+                  <span className="font-semibold text-stone-800">
+                    当前学生：
+                  </span>
+                  {currentStudentNames.length > 0
+                    ? currentStudentNames.join("、")
+                    : "暂无当前学生"}
                 </p>
               </div>
             </section>
@@ -484,8 +492,7 @@ function TeacherHomeContent() {
                         (relation) =>
                           relation.class_id === classItem.id &&
                           relation.students &&
-                          relation.students.status !== "withdrawn" &&
-                          relation.students.status !== "archived"
+                          isActiveStudent(relation.students)
                       )
                       .map((relation) => relation.students)
                       .filter(
@@ -497,13 +504,23 @@ function TeacherHomeContent() {
                         key={classItem.id}
                         className="rounded-2xl border border-emerald-100 bg-white/80 p-5"
                       >
-                        <p className="font-bold text-emerald-950">
-                          {classItem.name}
-                        </p>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-bold text-emerald-950">
+                              {classItem.name}
+                            </p>
 
-                        <p className="mt-1 text-xs text-stone-500">
-                          {classItem.cohorts?.name || "未设置届别"}
-                        </p>
+                            <p className="mt-1 text-xs text-stone-500">
+                              {classItem.cohorts?.name || "未设置届别"}
+                            </p>
+                          </div>
+
+                          {!isCurrentClass(classItem) && (
+                            <span className="w-fit rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-500">
+                              已封存
+                            </span>
+                          )}
+                        </div>
 
                         <div className="mt-3 space-y-2">
                           {studentsForClass.length === 0 ? (

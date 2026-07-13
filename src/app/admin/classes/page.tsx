@@ -43,7 +43,7 @@ type AdminActionRequest = {
 };
 
 const TOTAL_ADMIN_COUNT = 1;
-const DELETE_CLASS_REQUIRED_APPROVALS = 2;
+const DELETE_CLASS_REQUIRED_APPROVALS = 1;
 
 function normalizeName(name: string) {
   return name.trim().replace(/\s+/g, "").toLowerCase();
@@ -889,7 +889,7 @@ function AdminClassesContent() {
               href="/admin/import"
               className="w-fit rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900"
             >
-              批量导入账号
+              导入账号
             </Link>
 
             <Link
@@ -981,7 +981,7 @@ function AdminClassesContent() {
             </p>
           ) : filteredClasses.length === 0 ? (
             <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-              当前筛选条件下没有班级。你可以切换届别筛选，或者进入批量导入页面添加新班级。
+              当前筛选条件下没有班级。你可以切换届别筛选，或者进入导入页面添加新班级。
             </p>
           ) : (
             <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100">
