@@ -4,6 +4,7 @@ export type ParsedImportRow = {
   className: string;
   school: string;
   teacherName: string;
+  teacherEnteringYear: string;
   studentName: string;
   studentGrade: string;
 };

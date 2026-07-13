@@ -43,6 +43,7 @@ export function parseImportText(text: string): ParsedImportRow[] {
       className,
       school,
       teacherName,
+      teacherEnteringYear,
       studentNamesText,
       studentGrade,
     ] = columns;
@@ -57,6 +58,7 @@ export function parseImportText(text: string): ParsedImportRow[] {
         className: cleanCell(className),
         school: cleanCell(school),
         teacherName: cleanCell(teacherName),
+        teacherEnteringYear: cleanCell(teacherEnteringYear),
         studentName: "",
         studentGrade: cleanCell(studentGrade),
       });
@@ -71,6 +73,7 @@ export function parseImportText(text: string): ParsedImportRow[] {
         className: cleanCell(className),
         school: cleanCell(school),
         teacherName: cleanCell(teacherName),
+        teacherEnteringYear: cleanCell(teacherEnteringYear),
         studentName,
         studentGrade: cleanCell(studentGrade),
       });

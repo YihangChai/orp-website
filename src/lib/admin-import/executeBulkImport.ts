@@ -25,6 +25,7 @@ type TeacherRecord = {
   name: string;
   email: string | null;
   auth_user_id: string | null;
+  school_entering_year: number | null;
 };
 
 type StudentRecord = {
@@ -128,7 +129,7 @@ async function getOrCreateTeacher(row: PreviewImportRow) {
 
   const { data: existingTeacher, error: existingError } = await supabaseAdmin
     .from("teachers")
-    .select("id, name, email, auth_user_id")
+    .select("id, name, email, auth_user_id, school_entering_year")
     .eq("email", email)
     .maybeSingle();
 
@@ -165,6 +166,7 @@ async function getOrCreateTeacher(row: PreviewImportRow) {
       name: row.teacherName.trim(),
       email,
       auth_user_id: authData.user.id,
+      school_entering_year: Number(row.teacherEnteringYear),
       status: "active",
       must_change_password: true,
     })

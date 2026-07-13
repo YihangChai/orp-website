@@ -1,10 +1,11 @@
-import type {
-  ImportValidationError,
-  PreviewImportRow,
-} from "./types";
+import type { ImportValidationError, PreviewImportRow } from "./types";
 
 function isValidAccountPart(value: string) {
   return /^[a-zA-Z0-9._-]+$/.test(value);
+}
+
+function isValidTeacherEnteringYear(value: string) {
+  return /^\d{4}$/.test(value.trim());
 }
 
 export function validateImportRows(rows: PreviewImportRow[]) {
@@ -21,7 +22,7 @@ export function validateImportRows(rows: PreviewImportRow[]) {
   }
 
   const studentUsernameMap = new Map<string, number>();
-  const teacherEmailMap = new Map<string, string>();
+  const teacherEmailNameMap = new Map<string, string>();
 
   rows.forEach((row) => {
     if (!row.cohortName) {
@@ -56,11 +57,38 @@ export function validateImportRows(rows: PreviewImportRow[]) {
       });
     }
 
+    if (!row.teacherEnteringYear) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: "teacherEnteringYear",
+        message: "缺少小老师届别，例如 2024。",
+      });
+    }
+
+    if (
+      row.teacherEnteringYear &&
+      !isValidTeacherEnteringYear(row.teacherEnteringYear)
+    ) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: "teacherEnteringYear",
+        message: "小老师届别必须是 4 位年份，例如 2024、2025、2026。",
+      });
+    }
+
     if (!row.studentName) {
       errors.push({
         rowNumber: row.rowNumber,
         field: "studentName",
         message: "缺少学生姓名。",
+      });
+    }
+
+    if (!row.studentGrade) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: "studentGrade",
+        message: "缺少学生年级。",
       });
     }
 
@@ -72,6 +100,19 @@ export function validateImportRows(rows: PreviewImportRow[]) {
       });
     }
 
+    if (
+      row.teacherName &&
+      row.teacherEnteringYear &&
+      isValidTeacherEnteringYear(row.teacherEnteringYear) &&
+      !row.teacherEmail
+    ) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: "teacherEmail",
+        message: "无法生成小老师邮箱，请检查小老师姓名和届别。",
+      });
+    }
+
     if (row.studentName && !row.studentUsername) {
       errors.push({
         rowNumber: row.rowNumber,
@@ -80,10 +121,7 @@ export function validateImportRows(rows: PreviewImportRow[]) {
       });
     }
 
-    if (
-      row.teacherEmailPrefix &&
-      !isValidAccountPart(row.teacherEmailPrefix)
-    ) {
+    if (row.teacherEmailPrefix && !isValidAccountPart(row.teacherEmailPrefix)) {
       errors.push({
         rowNumber: row.rowNumber,
         field: "teacherEmailPrefix",
@@ -102,7 +140,7 @@ export function validateImportRows(rows: PreviewImportRow[]) {
     if (row.studentUsername) {
       const existingRowNumber = studentUsernameMap.get(row.studentUsername);
 
-      if (existingRowNumber) {
+      if (existingRowNumber !== undefined) {
         errors.push({
           rowNumber: row.rowNumber,
           field: "studentUsername",
@@ -114,27 +152,18 @@ export function validateImportRows(rows: PreviewImportRow[]) {
     }
 
     if (row.teacherEmail) {
-      const existingTeacherName = teacherEmailMap.get(row.teacherEmail);
+      const existingTeacherName = teacherEmailNameMap.get(row.teacherEmail);
 
       if (existingTeacherName && existingTeacherName !== row.teacherName) {
         errors.push({
           rowNumber: row.rowNumber,
           field: "teacherEmail",
-          message: `同一个老师邮箱对应了不同姓名：${existingTeacherName} / ${row.teacherName}`,
+          message: `自动生成的老师邮箱对应了不同姓名：${existingTeacherName} / ${row.teacherName}。请检查是否有老师重名或拼音冲突。`,
         });
       } else {
-        teacherEmailMap.set(row.teacherEmail, row.teacherName);
+        teacherEmailNameMap.set(row.teacherEmail, row.teacherName);
       }
     }
-
-    if (!row.studentGrade) {
-        errors.push({
-            rowNumber: row.rowNumber,
-            field: "studentGrade",
-            message: "缺少学生年级。",
-        });
-        }
-
   });
 
   return errors;

@@ -13,9 +13,9 @@ import type {
   PreviewImportRow,
 } from "@/lib/admin-import/types";
 
-const sampleText = `届别	班级名称	合作学校	小老师姓名	学生名单	学生年级
-2026暑期	秋叶班	河北某小学	Ethan	小明、小红、小刚	四年级
-2026暑期	小溪班	河北某小学	Mario	小亮、小雨	五年级`;
+const sampleText = `届别	班级名称	合作学校	小老师姓名	小老师届别	学生名单	学生年级
+2026-2027	秋叶班	河北某小学	柴一航	2024	小明、小红、小刚	四年级
+2026-2027	小溪班	河北某小学	薛喆天	2025	小亮、小雨	五年级`;
 
 export default function AdminImportPage() {
   return (
@@ -212,7 +212,7 @@ function AdminImportContent() {
                 从 Excel 或 Google Sheets 复制表格后粘贴到这里。推荐列顺序：
                 <span className="font-semibold text-emerald-800">
                   {" "}
-                  届别、班级名称、合作学校、小老师姓名、学生名单、学生年级
+                  届别、班级名称、合作学校、小老师姓名、小老师届别、学生名单、学生年级
                 </span>
                 。学生名单可以用顿号、逗号、分号或斜杠分隔。系统会自动根据老师和学生姓名生成邮箱前缀、学生用户名和登录邮箱。
               </p>
@@ -251,10 +251,10 @@ function AdminImportContent() {
 
               <div className="mt-2 space-y-2">
                 <p>
-                  小老师姓名 → 拼音 → 学校邮箱，例如：
+                  小老师姓名 + 小老师届别 → 拼音 + 届别后两位 → 学校邮箱
                   <span className="font-semibold text-emerald-800">
                     {" "}
-                    张三 → zhangsan@学校邮箱后缀
+                    张三 + 2024 → zhangsan24@shphschool.com
                   </span>
                 </p>
 
@@ -405,7 +405,7 @@ function ImportPreviewSection({
           </div>
 
           <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100">
-            <table className="w-full min-w-[1200px] border-collapse bg-white text-left text-sm">
+            <table className="w-full min-w-[1300px] border-collapse bg-white text-left text-sm">
               <thead className="bg-[#fffdf4] text-stone-600">
                 <tr>
                   <th className="px-4 py-3 font-semibold">行号</th>
@@ -413,6 +413,7 @@ function ImportPreviewSection({
                   <th className="px-4 py-3 font-semibold">班级</th>
                   <th className="px-4 py-3 font-semibold">学校</th>
                   <th className="px-4 py-3 font-semibold">小老师</th>
+                  <th className="px-4 py-3 font-semibold">小老师届别</th>
                   <th className="px-4 py-3 font-semibold">老师邮箱</th>
                   <th className="px-4 py-3 font-semibold">学生</th>
                   <th className="px-4 py-3 font-semibold">年级</th>
@@ -445,6 +446,10 @@ function ImportPreviewSection({
 
                     <td className="px-4 py-3 text-stone-700">
                       {row.teacherName || "-"}
+                    </td>
+
+                    <td className="px-4 py-3 text-stone-700">
+                      {row.teacherEnteringYear || "-"}
                     </td>
 
                     <td className="px-4 py-3 font-mono text-xs text-stone-700">
