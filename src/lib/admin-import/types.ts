@@ -34,8 +34,18 @@ export type BulkImportAccountItem = {
   loginAccount: string;
   initialPassword: string;
   className: string;
-  status: "created" | "existing" | "failed";
+  status: "created" | "existing" | "restored" | "failed";
   message?: string;
+};
+
+export type BulkImportReuseCandidate = {
+  role: "teacher" | "student";
+  rowNumber: number;
+  name: string;
+  loginAccount: string;
+  currentStatus: string;
+  className: string;
+  reason: string;
 };
 
 export type BulkImportResult = {
@@ -45,6 +55,7 @@ export type BulkImportResult = {
   teacherBindings: number;
   studentBindings: number;
   skippedExisting: number;
+  restoredAccounts: number;
   failed: number;
   accounts: BulkImportAccountItem[];
   errors: ImportValidationError[];

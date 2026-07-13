@@ -9,6 +9,7 @@ import { buildPreviewRows } from "@/lib/admin-import/buildPreviewRows";
 import { validateImportRows } from "@/lib/admin-import/validateImportRows";
 import type {
   BulkImportResult,
+  BulkImportReuseCandidate,
   ImportValidationError,
   PreviewImportRow,
 } from "@/lib/admin-import/types";
@@ -33,6 +34,10 @@ function AdminImportContent() {
     null
   );
   const [isImporting, setIsImporting] = useState(false);
+
+  const [reuseCandidates, setReuseCandidates] = useState<
+  BulkImportReuseCandidate[]
+>([]);
 
   const importResultRef = useRef<HTMLDivElement | null>(null);
 
@@ -83,6 +88,7 @@ function AdminImportContent() {
     setHasParsed(false);
     setMessage("");
     setImportResult(null);
+    setReuseCandidates([]);
   }
 
   function handleClear() {
@@ -90,26 +96,17 @@ function AdminImportContent() {
     setHasParsed(false);
     setMessage("");
     setImportResult(null);
+    setReuseCandidates([]);
   }
 
   function handlePreview() {
     setHasParsed(true);
     setMessage("");
     setImportResult(null);
+    setReuseCandidates([]);
   }
 
-  async function handleConfirmImport() {
-    if (!canConfirmImport) {
-      setMessage("请先完成预览并修正格式问题。");
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `确认正式导入吗？\n\n当前预计导入：\n班级 ${classCount} 个\n小老师 ${teacherCount} 位\n学生 ${studentCount} 名\n\n系统会创建账号、生成初始密码，并绑定班级关系。`
-    );
-
-    if (!confirmed) return;
-
+  async function submitBulkImport(allowReuseArchived: boolean) {
     setIsImporting(true);
     setMessage("");
     setImportResult(null);
@@ -133,19 +130,30 @@ function AdminImportContent() {
         },
         body: JSON.stringify({
           rows: parsedRows,
+          allowReuseArchived,
         }),
       });
 
       const data = await response.json();
 
+      if (response.status === 409 && data.requiresReuseConfirmation) {
+        setReuseCandidates(data.reuseCandidates || []);
+        setMessage(
+          data.message ||
+            "系统发现已封存账号。请确认是否复用并恢复这些账号。"
+        );
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(data.message || "导入请求失败。");
       }
 
+      setReuseCandidates([]);
       setImportResult(data.result);
 
       setMessage(
-        `导入完成：创建班级 ${data.result.createdClasses} 个，创建小老师 ${data.result.createdTeachers} 个，创建学生 ${data.result.createdStudents} 个，失败 ${data.result.failed} 条。请立即复制或下载新账号初始密码清单。`
+        `导入完成：创建班级 ${data.result.createdClasses} 个，创建小老师 ${data.result.createdTeachers} 个，创建学生 ${data.result.createdStudents} 个，恢复账号 ${data.result.restoredAccounts || 0} 个，失败 ${data.result.failed} 条。请立即复制或下载新账号初始密码清单。`
       );
 
       setTimeout(() => {
@@ -162,6 +170,36 @@ function AdminImportContent() {
     } finally {
       setIsImporting(false);
     }
+  }
+
+  async function handleConfirmImport() {
+    if (!canConfirmImport) {
+      setMessage("请先完成预览并修正格式问题。");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `确认正式导入吗？\n\n当前预计导入：\n班级 ${classCount} 个\n小老师 ${teacherCount} 位\n学生 ${studentCount} 名\n\n系统会创建新账号、生成初始密码，并绑定班级关系。如果发现已封存账号，系统会先要求你确认是否复用。`
+    );
+
+    if (!confirmed) return;
+
+    setReuseCandidates([]);
+    await submitBulkImport(false);
+  }
+
+  async function handleConfirmReuseArchivedAccounts() {
+    if (reuseCandidates.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `确认复用并恢复这 ${reuseCandidates.length} 个已封存账号吗？\n\n请确认这些账号确实是继续参加 ORP 的原成员，而不是重名或账号规则错误。`
+    );
+
+    if (!confirmed) return;
+
+    await submitBulkImport(true);
   }
 
   return (
@@ -280,6 +318,7 @@ function AdminImportContent() {
               setHasParsed(false);
               setMessage("");
               setImportResult(null);
+              setReuseCandidates([]);
             }}
             rows={12}
             placeholder="从 Excel 或 Google Sheets 复制导入表，然后粘贴到这里。"
@@ -313,6 +352,14 @@ function AdminImportContent() {
             classCount={classCount}
             teacherCount={teacherCount}
             studentCount={studentCount}
+          />
+        )}
+
+        {reuseCandidates.length > 0 && (
+          <ArchivedReuseConfirmationPanel
+            candidates={reuseCandidates}
+            onConfirm={handleConfirmReuseArchivedAccounts}
+            isImporting={isImporting}
           />
         )}
 
@@ -482,6 +529,98 @@ function ImportPreviewSection({
   );
 }
 
+type ArchivedReuseConfirmationPanelProps = {
+  candidates: BulkImportReuseCandidate[];
+  onConfirm: () => void;
+  isImporting: boolean;
+};
+
+function ArchivedReuseConfirmationPanel({
+  candidates,
+  onConfirm,
+  isImporting,
+}: ArchivedReuseConfirmationPanelProps) {
+  return (
+    <section className="mt-6 rounded-[1.75rem] border border-amber-200 bg-amber-50 p-5 shadow-sm md:p-6">
+      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <div>
+          <h2 className="text-xl font-bold text-amber-950">
+            发现已封存账号，需要确认是否复用
+          </h2>
+
+          <p className="mt-2 max-w-3xl text-sm leading-7 text-amber-800">
+            系统发现导入名单中有账号以前已经存在，但当前状态是 archived。
+            如果这些人是继续参加 ORP 的原成员，可以复用原账号并恢复为 active；
+            如果是重名或账号规则错误，请不要确认，先回到导入表修改。
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={isImporting}
+          className="w-fit rounded-full bg-amber-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-amber-950 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isImporting ? "正在恢复并导入..." : "确认复用并恢复账号"}
+        </button>
+      </div>
+
+      <div className="mt-5 overflow-x-auto rounded-2xl border border-amber-100 bg-white">
+        <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+          <thead className="bg-[#fffdf4] text-stone-600">
+            <tr>
+              <th className="px-4 py-3 font-semibold">行号</th>
+              <th className="px-4 py-3 font-semibold">角色</th>
+              <th className="px-4 py-3 font-semibold">姓名</th>
+              <th className="px-4 py-3 font-semibold">登录账号</th>
+              <th className="px-4 py-3 font-semibold">当前状态</th>
+              <th className="px-4 py-3 font-semibold">将绑定到班级</th>
+              <th className="px-4 py-3 font-semibold">说明</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {candidates.map((candidate, index) => (
+              <tr
+                key={`${candidate.role}-${candidate.loginAccount}-${index}`}
+                className="border-t border-amber-50"
+              >
+                <td className="px-4 py-3 text-stone-500">
+                  {candidate.rowNumber}
+                </td>
+
+                <td className="px-4 py-3 text-stone-700">
+                  {candidate.role === "teacher" ? "小老师" : "学生"}
+                </td>
+
+                <td className="px-4 py-3 font-semibold text-emerald-950">
+                  {candidate.name}
+                </td>
+
+                <td className="px-4 py-3 font-mono text-xs text-stone-700">
+                  {candidate.loginAccount}
+                </td>
+
+                <td className="px-4 py-3 text-amber-800">
+                  {candidate.currentStatus}
+                </td>
+
+                <td className="px-4 py-3 text-stone-700">
+                  {candidate.className}
+                </td>
+
+                <td className="px-4 py-3 text-stone-600">
+                  {candidate.reason}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 type ImportResultPanelProps = {
   result: BulkImportResult;
 };
@@ -493,6 +632,10 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
 
   const existingAccounts = result.accounts.filter(
     (account) => account.status === "existing"
+  );
+
+  const restoredAccounts = result.accounts.filter(
+    (account) => account.status === "restored"
   );
 
   const failedAccounts = result.accounts.filter(
@@ -559,6 +702,74 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
     URL.revokeObjectURL(url);
   }
 
+  function ImportStatsBox() {
+    return (
+      <div className="mt-5 rounded-2xl border border-amber-100 bg-white p-4">
+        <p className="text-sm font-bold text-amber-900">本次导入统计</p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-6">
+          <div className="rounded-2xl bg-[#fffdf4] p-4">
+            <p className="text-sm text-stone-500">创建班级</p>
+            <p className="mt-1 text-3xl font-bold text-emerald-950">
+              {result.createdClasses}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-[#fffdf4] p-4">
+            <p className="text-sm text-stone-500">创建小老师</p>
+            <p className="mt-1 text-3xl font-bold text-emerald-950">
+              {result.createdTeachers}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-[#fffdf4] p-4">
+            <p className="text-sm text-stone-500">创建学生</p>
+            <p className="mt-1 text-3xl font-bold text-emerald-950">
+              {result.createdStudents}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-[#fffdf4] p-4">
+            <p className="text-sm text-stone-500">恢复账号</p>
+            <p className="mt-1 text-3xl font-bold text-amber-800">
+              {result.restoredAccounts || 0}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-[#fffdf4] p-4">
+            <p className="text-sm text-stone-500">跳过已存在</p>
+            <p className="mt-1 text-3xl font-bold text-emerald-950">
+              {result.skippedExisting}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-[#fffdf4] p-4">
+            <p className="text-sm text-stone-500">失败</p>
+            <p className="mt-1 text-3xl font-bold text-red-700">
+              {result.failed}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+            <p className="text-sm text-stone-500">老师班级绑定</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-950">
+              {result.teacherBindings}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+            <p className="text-sm text-stone-500">学生班级绑定</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-950">
+              {result.studentBindings}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
       <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
@@ -583,60 +794,7 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
         )}
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-5">
-        <div className="rounded-2xl bg-[#fffdf4] p-4">
-          <p className="text-sm text-stone-500">创建班级</p>
-          <p className="mt-1 text-3xl font-bold text-emerald-950">
-            {result.createdClasses}
-          </p>
-        </div>
-
-        <div className="rounded-2xl bg-[#fffdf4] p-4">
-          <p className="text-sm text-stone-500">创建小老师</p>
-          <p className="mt-1 text-3xl font-bold text-emerald-950">
-            {result.createdTeachers}
-          </p>
-        </div>
-
-        <div className="rounded-2xl bg-[#fffdf4] p-4">
-          <p className="text-sm text-stone-500">创建学生</p>
-          <p className="mt-1 text-3xl font-bold text-emerald-950">
-            {result.createdStudents}
-          </p>
-        </div>
-
-        <div className="rounded-2xl bg-[#fffdf4] p-4">
-          <p className="text-sm text-stone-500">跳过已存在</p>
-          <p className="mt-1 text-3xl font-bold text-emerald-950">
-            {result.skippedExisting}
-          </p>
-        </div>
-
-        <div className="rounded-2xl bg-[#fffdf4] p-4">
-          <p className="text-sm text-stone-500">失败</p>
-          <p className="mt-1 text-3xl font-bold text-red-700">
-            {result.failed}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-emerald-100 bg-white p-4">
-          <p className="text-sm text-stone-500">老师班级绑定</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-950">
-            {result.teacherBindings}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-emerald-100 bg-white p-4">
-          <p className="text-sm text-stone-500">学生班级绑定</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-950">
-            {result.studentBindings}
-          </p>
-        </div>
-      </div>
-
-      {createdAccounts.length > 0 && (
+      {createdAccounts.length > 0 ? (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
             <div>
@@ -667,6 +825,8 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
               </button>
             </div>
           </div>
+
+          <ImportStatsBox />
 
           <div className="mt-4 overflow-x-auto rounded-2xl border border-amber-100 bg-white">
             <table className="w-full min-w-[900px] border-collapse text-left text-sm">
@@ -709,6 +869,40 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-6 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+          <p className="text-sm font-bold text-emerald-900">
+            本次没有新创建账号
+          </p>
+
+          <p className="mt-2 text-sm leading-7 text-emerald-800">
+            系统没有生成新的初始密码。可能是因为本次导入的老师或学生账号之前已经存在，系统复用了已有账号，或者恢复了已封存账号。
+          </p>
+
+          <ImportStatsBox />
+        </div>
+      )}
+
+      {restoredAccounts.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-amber-100 bg-amber-50 p-4">
+          <p className="text-sm font-bold text-amber-900">已恢复账号</p>
+
+          <p className="mt-2 text-sm leading-7 text-amber-800">
+            这些账号之前处于 archived 状态。本次导入时管理员已确认复用，系统已恢复为 active 并绑定到新班级。
+          </p>
+
+          <div className="mt-3 space-y-2">
+            {restoredAccounts.map((account, index) => (
+              <p
+                key={`${account.role}-${account.loginAccount}-${index}`}
+                className="text-sm text-amber-900"
+              >
+                {account.role === "teacher" ? "小老师" : "学生"}：
+                {account.name}（{account.loginAccount}）- {account.className}
+              </p>
+            ))}
           </div>
         </div>
       )}
