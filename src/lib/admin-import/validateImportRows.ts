@@ -4,8 +4,12 @@ function isValidAccountPart(value: string) {
   return /^[a-zA-Z0-9._-]+$/.test(value);
 }
 
-function isValidTeacherEnteringYear(value: string) {
-  return /^\d{4}$/.test(value.trim());
+// function isValidTeacherEnteringYear(value: string) {
+//   return /^\d{4}$/.test(value.trim());
+// }
+
+function isValidTeacherEmailSuffix(value: string) {
+  return /^\d{2,3}$/.test(value.trim());
 }
 
 export function validateImportRows(rows: PreviewImportRow[]) {
@@ -61,18 +65,18 @@ export function validateImportRows(rows: PreviewImportRow[]) {
       errors.push({
         rowNumber: row.rowNumber,
         field: "teacherEnteringYear",
-        message: "缺少小老师届别，例如 2024。",
+        message: "缺少小老师邮箱后缀，例如 24 或 259。",
       });
     }
 
     if (
       row.teacherEnteringYear &&
-      !isValidTeacherEnteringYear(row.teacherEnteringYear)
+      !isValidTeacherEmailSuffix(row.teacherEnteringYear)
     ) {
       errors.push({
         rowNumber: row.rowNumber,
         field: "teacherEnteringYear",
-        message: "小老师届别必须是 4 位年份，例如 2024、2025、2026。",
+        message: "请检查小老师邮箱后缀格式",
       });
     }
 
@@ -103,7 +107,7 @@ export function validateImportRows(rows: PreviewImportRow[]) {
     if (
       row.teacherName &&
       row.teacherEnteringYear &&
-      isValidTeacherEnteringYear(row.teacherEnteringYear) &&
+      isValidTeacherEmailSuffix(row.teacherEnteringYear) &&
       !row.teacherEmail
     ) {
       errors.push({
