@@ -5,14 +5,21 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import AdminGuard from "@/components/AdminGuard";
 
-const DELETE_TEACHER_REQUIRED_APPROVALS = 2;
+/**
+ * admin/teachers 页面原则：
+ * 1. AdminGuard 负责确认当前用户是否是管理员。
+ * 2. 本页面只负责小老师统计、查询和详情入口。
+ * 3. 小老师账号创建、密码重置、班级调整、删除/归档等维护操作，统一放到 /admin/maintenance。
+ * 4. 本页面不再展示账号绑定判断，不再处理删除申请或高风险操作。
+ * 5. 管理员在这里主要观察小老师负责班级、学生数量、课程次数、近 30 天上课次数、近 4 周活跃情况。
+ * 6. “待维护”包含：状态异常，或者 active 但未分配班级。
+ */
 
 type TeacherRow = {
   id: string;
   name: string;
   email: string | null;
   status: string;
-  auth_user_id: string | null;
   created_at: string;
 };
 
@@ -21,13 +28,15 @@ type TeacherTableItem = {
   name: string;
   email: string | null;
   status: string;
-  authUserId: string | null;
+
   classNames: string[];
   classDescriptions: string[];
   classIds: string[];
   cohortIds: string[];
+
   studentCount: number;
   lessonCount: number;
+  recentThirtyDaysLessonCount: number;
   totalMinutes: number;
   recentLessonDate: string | null;
   recentFourWeeksCount: number;
@@ -36,7 +45,17 @@ type TeacherTableItem = {
 type ClassTeacherRow = {
   teacher_id: string;
   class_id: string;
-  classes: any;
+  classes: {
+    id: string;
+    name: string;
+    school: string | null;
+    status: string;
+    cohorts: {
+      id: string;
+      name: string;
+      status?: string;
+    } | null;
+  } | null;
 };
 
 type ClassStudentRow = {
@@ -58,35 +77,80 @@ type CohortRow = {
   status: string;
 };
 
-type PendingRequest = {
-  id: string;
-  action_type: string;
-  target_type: string;
-  target_id: string;
-  target_name: string;
-  status: string;
-  approvals_count: number;
-  required_approvals: number;
-  requested_by: string | null;
-  note: string | null;
-  created_at: string;
-};
+function isCurrentTeacher(teacher: TeacherTableItem) {
+  return teacher.status === "active" && teacher.classIds.length > 0;
+}
+
+function isMaintenanceTeacher(teacher: TeacherTableItem) {
+  return (
+    (teacher.status !== "active" && teacher.status !== "archived") ||
+    (teacher.status === "active" && teacher.classIds.length === 0)
+  );
+}
 
 function getTeacherStatusLabel(status: string) {
+  if (status === "active") return "当前";
   if (status === "archived") return "已归档";
-  if (status === "delete_requested") return "待删除确认";
-  return "当前";
+  if (status === "withdrawn") return "已退出";
+  if (status === "delete_requested") return "待维护";
+  return status;
 }
 
 function getTeacherStatusClassName(status: string) {
+  if (status === "active") return "bg-emerald-50 text-emerald-700";
   if (status === "archived") return "bg-stone-100 text-stone-500";
+  if (status === "withdrawn") return "bg-amber-50 text-amber-700";
   if (status === "delete_requested") return "bg-red-50 text-red-700";
-  return "bg-emerald-50 text-emerald-700";
+  return "bg-stone-100 text-stone-500";
 }
 
-function getActionLabel(actionType: string) {
-  if (actionType === "delete_teacher") return "删除小老师";
-  return actionType;
+function getAttentionLabel(teacher: TeacherTableItem) {
+  if (teacher.status === "archived") {
+    return {
+      text: "已归档",
+      className: "bg-stone-100 text-stone-500",
+    };
+  }
+
+  if (teacher.status !== "active") {
+    return {
+      text: "待维护：状态异常",
+      className: "bg-red-50 text-red-700",
+    };
+  }
+
+  if (teacher.classIds.length === 0) {
+    return {
+      text: "待维护：未分配班级",
+      className: "bg-red-50 text-red-700",
+    };
+  }
+
+  if (teacher.lessonCount === 0) {
+    return {
+      text: "暂无课程",
+      className: "bg-stone-100 text-stone-500",
+    };
+  }
+
+  if (teacher.recentThirtyDaysLessonCount === 0) {
+    return {
+      text: "近 30 天无课",
+      className: "bg-amber-50 text-amber-700",
+    };
+  }
+
+  if (teacher.recentFourWeeksCount < 2) {
+    return {
+      text: "频率偏低",
+      className: "bg-amber-50 text-amber-700",
+    };
+  }
+
+  return {
+    text: "正常",
+    className: "bg-emerald-50 text-emerald-700",
+  };
 }
 
 function getMondayKey(dateString: string) {
@@ -105,7 +169,9 @@ function getMondayKey(dateString: string) {
 function getRecentFourWeeksCount(lessons: LessonRecordRow[]) {
   const today = new Date();
   const fourWeeksAgo = new Date();
+
   fourWeeksAgo.setDate(today.getDate() - 28);
+  fourWeeksAgo.setHours(0, 0, 0, 0);
 
   const recentLessons = lessons.filter((lesson) => {
     const lessonDate = new Date(lesson.lesson_date);
@@ -121,20 +187,36 @@ function getRecentFourWeeksCount(lessons: LessonRecordRow[]) {
   return weekKeys.size;
 }
 
+function isWithinRecentThirtyDays(dateString: string) {
+  const lessonDate = new Date(dateString);
+  const today = new Date();
+  const thirtyDaysAgo = new Date();
+
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+  thirtyDaysAgo.setHours(0, 0, 0, 0);
+
+  return lessonDate >= thirtyDaysAgo && lessonDate <= today;
+}
+
 function formatHours(minutes: number) {
   return Math.round((minutes / 60) * 10) / 10;
 }
 
 export default function AdminTeachersPage() {
+  return (
+    <AdminGuard>
+      <AdminTeachersContent />
+    </AdminGuard>
+  );
+}
+
+function AdminTeachersContent() {
   const [teachers, setTeachers] = useState<TeacherTableItem[]>([]);
   const [cohorts, setCohorts] = useState<CohortRow[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
 
   const [keyword, setKeyword] = useState("");
   const [selectedTeacherView, setSelectedTeacherView] = useState("current");
-  const [currentAdminName, setCurrentAdminName] = useState("");
 
-  const [isTeacherListOpen, setIsTeacherListOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -142,406 +224,166 @@ export default function AdminTeachersPage() {
     setIsLoading(true);
     setMessage("");
 
-    const { data: teacherData, error: teacherError } = await supabase
-      .from("teachers")
-      .select("id, name, email, status, auth_user_id, created_at")
-      .order("created_at", { ascending: false });
+    try {
+      const { data: teacherData, error: teacherError } = await supabase
+        .from("teachers")
+        .select("id, name, email, status, created_at")
+        .order("created_at", { ascending: false });
 
-    if (teacherError) {
-      setMessage(`读取小老师失败：${teacherError.message}`);
-      setIsLoading(false);
-      return;
-    }
+      if (teacherError) {
+        throw new Error(`读取小老师失败：${teacherError.message}`);
+      }
 
-    const { data: classTeacherData, error: classTeacherError } = await supabase
-      .from("class_teachers")
-      .select(
-        `
-        teacher_id,
-        class_id,
-        classes (
-          id,
-          name,
-          school,
-          status,
-          cohorts (
+      const { data: classTeacherData, error: classTeacherError } =
+        await supabase.from("class_teachers").select(
+          `
+          teacher_id,
+          class_id,
+          classes (
             id,
-            name
+            name,
+            school,
+            status,
+            cohorts (
+              id,
+              name,
+              status
+            )
           )
-        )
-      `
-      );
-
-    if (classTeacherError) {
-      setMessage(`读取小老师班级关系失败：${classTeacherError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
-    const { data: classStudentData, error: classStudentError } = await supabase
-      .from("class_students")
-      .select("class_id, student_id");
-
-    if (classStudentError) {
-      setMessage(`读取班级学生关系失败：${classStudentError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
-    const { data: lessonData, error: lessonError } = await supabase
-      .from("lesson_records")
-      .select("id, teacher_id, class_id, lesson_date, duration_minutes")
-      .order("lesson_date", { ascending: false });
-
-    if (lessonError) {
-      setMessage(`读取课程记录失败：${lessonError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
-    const { data: cohortData, error: cohortError } = await supabase
-      .from("cohorts")
-      .select("id, name, status")
-      .order("created_at", { ascending: false });
-
-    if (cohortError) {
-      setMessage(`读取届别失败：${cohortError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
-    const { data: requestData, error: requestError } = await supabase
-      .from("admin_action_requests")
-      .select(
-        "id, action_type, target_type, target_id, target_name, status, approvals_count, required_approvals, requested_by, note, created_at"
-      )
-      .eq("action_type", "delete_teacher")
-      .eq("status", "pending")
-      .order("created_at", { ascending: false });
-
-    if (requestError) {
-      setMessage(`读取待处理操作失败：${requestError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
-    const teacherRows = (teacherData || []) as TeacherRow[];
-    const classTeacherRows = (classTeacherData || []) as ClassTeacherRow[];
-    const classStudentRows = (classStudentData || []) as ClassStudentRow[];
-    const lessonRows = (lessonData || []) as LessonRecordRow[];
-
-    const formattedTeachers: TeacherTableItem[] = teacherRows.map((teacher) => {
-      const teacherClassRelations = classTeacherRows.filter(
-        (relation) => relation.teacher_id === teacher.id
-      );
-
-      const classIds = teacherClassRelations
-        .map((relation) => relation.class_id)
-        .filter(Boolean);
-
-      const classNames = teacherClassRelations
-        .map((relation) => relation.classes?.name)
-        .filter(Boolean);
-
-      const cohortIds = Array.from(
-        new Set(
-          teacherClassRelations
-            .map((relation) => relation.classes?.cohorts?.id)
-            .filter(Boolean)
-        )
-      );
-
-      const classDescriptions = teacherClassRelations
-        .map((relation) => {
-          const classItem = relation.classes;
-
-          if (!classItem) return null;
-
-          const cohortName = classItem.cohorts?.name || "未设置届别";
-          const schoolName = classItem.school || "未填写学校";
-
-          return `${classItem.name} · ${cohortName} · ${schoolName}`;
-        })
-        .filter(Boolean) as string[];
-
-      const studentIds = new Set<string>();
-
-      classStudentRows.forEach((relation) => {
-        if (classIds.includes(relation.class_id)) {
-          studentIds.add(relation.student_id);
-        }
-      });
-
-      const teacherLessons = lessonRows.filter((lesson) => {
-        return lesson.teacher_id === teacher.id;
-      });
-
-      const totalMinutes = teacherLessons.reduce(
-        (sum, lesson) => sum + (lesson.duration_minutes || 0),
-        0
-      );
-
-      const sortedLessons = [...teacherLessons].sort(
-        (a, b) =>
-          new Date(b.lesson_date).getTime() -
-          new Date(a.lesson_date).getTime()
-      );
-
-      return {
-        id: teacher.id,
-        name: teacher.name,
-        email: teacher.email,
-        status: teacher.status || "active",
-        authUserId: teacher.auth_user_id,
-        classNames,
-        classDescriptions,
-        classIds,
-        cohortIds,
-        studentCount: studentIds.size,
-        lessonCount: teacherLessons.length,
-        totalMinutes,
-        recentLessonDate: sortedLessons[0]?.lesson_date || null,
-        recentFourWeeksCount: getRecentFourWeeksCount(teacherLessons),
-      };
-    });
-
-    setTeachers(formattedTeachers);
-    setCohorts((cohortData || []) as CohortRow[]);
-    setPendingRequests((requestData || []) as PendingRequest[]);
-    setIsLoading(false);
-  }
-
-  async function handleRequestDeleteTeacher(
-    teacherId: string,
-    teacherName: string
-  ) {
-    const confirmed = window.confirm(
-      `确定要发起删除「${teacherName}」的申请吗？需要 ${DELETE_TEACHER_REQUIRED_APPROVALS} 位管理员确认。没有课程记录会物理删除；有课程记录会归档。`
-    );
-
-    if (!confirmed) return;
-
-    const existingRequest = pendingRequests.find(
-      (request) =>
-        request.action_type === "delete_teacher" &&
-        request.target_id === teacherId &&
-        request.status === "pending"
-    );
-
-    if (existingRequest) {
-      setMessage("这个小老师已经有待处理的删除申请。");
-      return;
-    }
-
-    const { error: requestError } = await supabase
-      .from("admin_action_requests")
-      .insert({
-        action_type: "delete_teacher",
-        target_type: "teacher",
-        target_id: teacherId,
-        target_name: teacherName,
-        status: "pending",
-        approvals_count: 0,
-        required_approvals: DELETE_TEACHER_REQUIRED_APPROVALS,
-        requested_by: "当前管理员",
-        note: "删除小老师申请。无课程记录则物理删除；有课程记录则归档。",
-      });
-
-    if (requestError) {
-      setMessage(`创建删除申请失败：${requestError.message}`);
-      return;
-    }
-
-    const { error: teacherError } = await supabase
-      .from("teachers")
-      .update({ status: "delete_requested" })
-      .eq("id", teacherId);
-
-    if (teacherError) {
-      setMessage(`删除申请已创建，但更新老师状态失败：${teacherError.message}`);
-      fetchTeachers();
-      return;
-    }
-
-    setMessage(`已发起删除申请：${teacherName}`);
-    fetchTeachers();
-  }
-
-  async function registerApproval(request: PendingRequest) {
-    const trimmedAdminName = currentAdminName.trim();
-
-    if (!trimmedAdminName) {
-      setMessage("请先在高风险操作区填写当前管理员姓名。");
-      return null;
-    }
-
-    const { error: approvalError } = await supabase
-      .from("admin_action_approvals")
-      .insert({
-        request_id: request.id,
-        admin_name: trimmedAdminName,
-      });
-
-    if (approvalError) {
-      if (
-        approvalError.message.includes("duplicate") ||
-        approvalError.message.includes("unique")
-      ) {
-        setMessage(
-          `管理员「${trimmedAdminName}」已经确认过这项申请，不能重复确认。`
+        `
         );
-      } else {
-        setMessage(`记录确认失败：${approvalError.message}`);
+
+      if (classTeacherError) {
+        throw new Error(
+          `读取小老师班级关系失败：${classTeacherError.message}`
+        );
       }
 
-      return null;
-    }
+      const { data: classStudentData, error: classStudentError } =
+        await supabase.from("class_students").select("class_id, student_id");
 
-    const { count, error: countError } = await supabase
-      .from("admin_action_approvals")
-      .select("id", { count: "exact", head: true })
-      .eq("request_id", request.id);
+      if (classStudentError) {
+        throw new Error(`读取班级学生关系失败：${classStudentError.message}`);
+      }
 
-    if (countError) {
-      setMessage(`统计确认次数失败：${countError.message}`);
-      return null;
-    }
+      const { data: lessonData, error: lessonError } = await supabase
+        .from("lesson_records")
+        .select("id, teacher_id, class_id, lesson_date, duration_minutes")
+        .order("lesson_date", { ascending: false });
 
-    const approvalCount = count || 0;
+      if (lessonError) {
+        throw new Error(`读取课程记录失败：${lessonError.message}`);
+      }
 
-    const { error: updateError } = await supabase
-      .from("admin_action_requests")
-      .update({
-        approvals_count: approvalCount,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", request.id);
+      const { data: cohortData, error: cohortError } = await supabase
+        .from("cohorts")
+        .select("id, name, status")
+        .order("created_at", { ascending: false });
 
-    if (updateError) {
-      setMessage(`更新确认次数失败：${updateError.message}`);
-      return null;
-    }
+      if (cohortError) {
+        throw new Error(`读取届别失败：${cohortError.message}`);
+      }
 
-    return approvalCount;
-  }
+      const teacherRows = (teacherData || []) as TeacherRow[];
+      const classTeacherRows =
+        (classTeacherData || []) as unknown as ClassTeacherRow[];
+      const classStudentRows = (classStudentData || []) as ClassStudentRow[];
+      const lessonRows = (lessonData || []) as LessonRecordRow[];
 
-  async function handleApproveTeacherRequest(request: PendingRequest) {
-    const approvalCount = await registerApproval(request);
+      const formattedTeachers: TeacherTableItem[] = teacherRows.map(
+        (teacher) => {
+          const teacherClassRelations = classTeacherRows.filter(
+            (relation) => relation.teacher_id === teacher.id
+          );
 
-    if (approvalCount === null) return;
+          const classIds = teacherClassRelations
+            .map((relation) => relation.class_id)
+            .filter(Boolean);
 
-    if (approvalCount < request.required_approvals) {
-      setMessage(
-        `已确认，还需要 ${request.required_approvals - approvalCount} 位管理员确认。`
+          const classNames = teacherClassRelations
+            .map((relation) => relation.classes?.name)
+            .filter(Boolean) as string[];
+
+          const cohortIds = Array.from(
+            new Set(
+              teacherClassRelations
+                .map((relation) => relation.classes?.cohorts?.id)
+                .filter(Boolean) as string[]
+            )
+          );
+
+          const classDescriptions = teacherClassRelations
+            .map((relation) => {
+              const classItem = relation.classes;
+
+              if (!classItem) return null;
+
+              const cohortName = classItem.cohorts?.name || "未设置届别";
+              const schoolName = classItem.school || "未填写学校";
+              const classStatus =
+                classItem.status === "active" ? "运行中" : "已封存/历史";
+
+              return `${classItem.name} · ${cohortName} · ${schoolName} · ${classStatus}`;
+            })
+            .filter(Boolean) as string[];
+
+          const studentIds = new Set<string>();
+
+          classStudentRows.forEach((relation) => {
+            if (classIds.includes(relation.class_id)) {
+              studentIds.add(relation.student_id);
+            }
+          });
+
+          const teacherLessons = lessonRows.filter((lesson) => {
+            return lesson.teacher_id === teacher.id;
+          });
+
+          const recentThirtyDaysLessonCount = teacherLessons.filter((lesson) =>
+            isWithinRecentThirtyDays(lesson.lesson_date)
+          ).length;
+
+          const totalMinutes = teacherLessons.reduce(
+            (sum, lesson) => sum + (lesson.duration_minutes || 0),
+            0
+          );
+
+          const sortedLessons = [...teacherLessons].sort(
+            (a, b) =>
+              new Date(b.lesson_date).getTime() -
+              new Date(a.lesson_date).getTime()
+          );
+
+          return {
+            id: teacher.id,
+            name: teacher.name,
+            email: teacher.email,
+            status: teacher.status || "active",
+
+            classNames,
+            classDescriptions,
+            classIds,
+            cohortIds,
+
+            studentCount: studentIds.size,
+            lessonCount: teacherLessons.length,
+            recentThirtyDaysLessonCount,
+            totalMinutes,
+            recentLessonDate: sortedLessons[0]?.lesson_date || null,
+            recentFourWeeksCount: getRecentFourWeeksCount(teacherLessons),
+          };
+        }
       );
-      fetchTeachers();
-      return;
+
+      setTeachers(formattedTeachers);
+      setCohorts((cohortData || []) as CohortRow[]);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "读取小老师数据失败。"
+      );
+    } finally {
+      setIsLoading(false);
     }
-
-    const { count: lessonCount, error: lessonCountError } = await supabase
-      .from("lesson_records")
-      .select("id", { count: "exact", head: true })
-      .eq("teacher_id", request.target_id);
-
-    if (lessonCountError) {
-      setMessage(`检查课程记录失败：${lessonCountError.message}`);
-      return;
-    }
-
-    if ((lessonCount || 0) > 0) {
-      const { error: archiveError } = await supabase
-        .from("teachers")
-        .update({ status: "archived" })
-        .eq("id", request.target_id);
-
-      if (archiveError) {
-        setMessage(`归档小老师失败：${archiveError.message}`);
-        return;
-      }
-    } else {
-      const { error: relationDeleteError } = await supabase
-        .from("class_teachers")
-        .delete()
-        .eq("teacher_id", request.target_id);
-
-      if (relationDeleteError) {
-        setMessage(`删除老师班级关系失败：${relationDeleteError.message}`);
-        return;
-      }
-
-      const { error: teacherDeleteError } = await supabase
-        .from("teachers")
-        .delete()
-        .eq("id", request.target_id);
-
-      if (teacherDeleteError) {
-        setMessage(`删除小老师失败：${teacherDeleteError.message}`);
-        return;
-      }
-    }
-
-    const { error: completeError } = await supabase
-      .from("admin_action_requests")
-      .update({
-        approvals_count: approvalCount,
-        status: "completed",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", request.id);
-
-    if (completeError) {
-      setMessage(`操作已执行，但更新申请状态失败：${completeError.message}`);
-      fetchTeachers();
-      return;
-    }
-
-    setMessage(`删除/归档已完成：${request.target_name}`);
-    fetchTeachers();
-  }
-
-  async function handleCancelRequest(request: PendingRequest) {
-    const confirmed = window.confirm(
-      `确定要撤回「${request.target_name}」的申请吗？`
-    );
-
-    if (!confirmed) return;
-
-    const { error: approvalDeleteError } = await supabase
-      .from("admin_action_approvals")
-      .delete()
-      .eq("request_id", request.id);
-
-    if (approvalDeleteError) {
-      setMessage(`清除确认记录失败：${approvalDeleteError.message}`);
-      return;
-    }
-
-    const { error: requestError } = await supabase
-      .from("admin_action_requests")
-      .update({
-        status: "canceled",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", request.id);
-
-    if (requestError) {
-      setMessage(`撤回申请失败：${requestError.message}`);
-      return;
-    }
-
-    const { error: teacherError } = await supabase
-      .from("teachers")
-      .update({ status: "active" })
-      .eq("id", request.target_id);
-
-    if (teacherError) {
-      setMessage(`申请已撤回，但恢复老师状态失败：${teacherError.message}`);
-      fetchTeachers();
-      return;
-    }
-
-    setMessage(`已撤回申请：${request.target_name}`);
-    fetchTeachers();
   }
 
   useEffect(() => {
@@ -551,218 +393,237 @@ export default function AdminTeachersPage() {
   const filteredTeachers = useMemo(() => {
     const searchText = keyword.trim().toLowerCase();
 
-    const viewFilteredTeachers = teachers.filter((teacher) => {
-      if (selectedTeacherView === "current") {
-        return teacher.status !== "archived";
-      }
+    let result = teachers;
 
-      return teacher.cohortIds.includes(selectedTeacherView);
-    });
+    if (selectedTeacherView === "current") {
+      result = result.filter(isCurrentTeacher);
+    }
 
-    if (!searchText) return viewFilteredTeachers;
+    if (selectedTeacherView === "needs_maintenance") {
+      result = result.filter(isMaintenanceTeacher);
+    }
 
-    return viewFilteredTeachers.filter((teacher) => {
-      const searchableText = [
-        teacher.name,
-        teacher.email || "",
-        teacher.classNames.join(" "),
-        teacher.classDescriptions.join(" "),
-        getTeacherStatusLabel(teacher.status),
-      ]
-        .join(" ")
-        .toLowerCase();
+    if (selectedTeacherView === "archived") {
+      result = result.filter((teacher) => teacher.status === "archived");
+    }
 
-      return searchableText.includes(searchText);
-    });
+    if (
+      selectedTeacherView !== "current" &&
+      selectedTeacherView !== "needs_maintenance" &&
+      selectedTeacherView !== "archived"
+    ) {
+      result = result.filter((teacher) =>
+        teacher.cohortIds.includes(selectedTeacherView)
+      );
+    }
+
+    if (searchText) {
+      result = result.filter((teacher) => {
+        const searchableText = [
+          teacher.name,
+          teacher.email || "",
+          teacher.classNames.join(" "),
+          teacher.classDescriptions.join(" "),
+          getTeacherStatusLabel(teacher.status),
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        return searchableText.includes(searchText);
+      });
+    }
+
+    return result;
   }, [keyword, selectedTeacherView, teachers]);
 
-  const currentTeacherCount = teachers.filter(
-    (teacher) => teacher.status !== "archived"
-  ).length;
+  const currentTeacherCount = useMemo(() => {
+    return teachers.filter(isCurrentTeacher).length;
+  }, [teachers]);
 
-  const archivedTeacherCount = teachers.filter(
-    (teacher) => teacher.status === "archived"
-  ).length;
+  const needsMaintenanceTeacherCount = useMemo(() => {
+    return teachers.filter(isMaintenanceTeacher).length;
+  }, [teachers]);
 
-  const unboundTeacherCount = teachers.filter(
-    (teacher) => !teacher.authUserId
-  ).length;
+  const archivedTeacherCount = useMemo(() => {
+    return teachers.filter((teacher) => teacher.status === "archived").length;
+  }, [teachers]);
 
-  const totalLessonCount = teachers.reduce(
-    (sum, teacher) => sum + teacher.lessonCount,
-    0
-  );
+  const totalLessonCount = useMemo(() => {
+    return teachers.reduce((sum, teacher) => sum + teacher.lessonCount, 0);
+  }, [teachers]);
+
+  const totalRecentThirtyDaysLessonCount = useMemo(() => {
+    return teachers.reduce(
+      (sum, teacher) => sum + teacher.recentThirtyDaysLessonCount,
+      0
+    );
+  }, [teachers]);
 
   return (
-    <AdminGuard>
-      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
-        <section className="mx-auto max-w-7xl">
-          <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+    <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+      <section className="mx-auto max-w-7xl">
+        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-semibold text-[#2f5d50]">
+              Admin / 小老师查询
+            </p>
+
+            <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+              小老师查询
+            </h1>
+
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
+              本页面只用于查看小老师、负责班级、学生数量和课程记录统计。小老师封存、恢复、密码重置、班级关系调整等维护操作统一放到维护中心处理。
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/maintenance"
+              className="w-fit rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900"
+            >
+              进入维护中心
+            </Link>
+
+            <Link
+              href="/admin"
+              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+            >
+              返回管理员首页
+            </Link>
+          </div>
+        </div>
+
+        {message && (
+          <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            {message}
+          </div>
+        )}
+
+        <section className="grid gap-4 md:grid-cols-5">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+            <p className="text-sm text-stone-500">当前小老师</p>
+
+            <p className="mt-2 text-3xl font-bold text-emerald-950">
+              {currentTeacherCount}
+            </p>
+
+            <p className="mt-1 text-xs text-stone-500">当前且已分配班级</p>
+          </div>
+
+          <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
+            <p className="text-sm text-stone-500">待维护</p>
+
+            <p className="mt-2 text-3xl font-bold text-red-700">
+              {needsMaintenanceTeacherCount}
+            </p>
+
+            <p className="mt-1 text-xs text-stone-500">
+              状态异常或未分配班级
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-stone-100 bg-white p-5 shadow-sm">
+            <p className="text-sm text-stone-500">已归档小老师</p>
+
+            <p className="mt-2 text-3xl font-bold text-stone-600">
+              {archivedTeacherCount}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+            <p className="text-sm text-stone-500">近 30 天课程</p>
+
+            <p className="mt-2 text-3xl font-bold text-emerald-950">
+              {totalRecentThirtyDaysLessonCount}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+            <p className="text-sm text-stone-500">全部课程记录</p>
+
+            <p className="mt-2 text-3xl font-bold text-emerald-950">
+              {totalLessonCount}
+            </p>
+          </div>
+        </section>
+
+        <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
             <div>
-              <p className="text-sm font-semibold text-[#2f5d50]">
-                Admin / 小老师管理
-              </p>
+              <h2 className="text-xl font-bold text-emerald-950">
+                小老师列表
+              </h2>
 
-              <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-                小老师管理
-              </h1>
-
-              <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-                小老师由班级管理中的分班导入自动创建。这里用于查看小老师、核对负责班级、处理账号绑定和删除错建资料。
+              <p className="mt-2 text-sm leading-7 text-stone-600">
+                默认显示当前且已分配班级的小老师。待维护包含状态异常，或者当前账号存在但尚未分配班级的小老师。
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href="/admin"
-                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+            <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <select
+                value={selectedTeacherView}
+                onChange={(event) => setSelectedTeacherView(event.target.value)}
+                className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-64"
               >
-                返回管理员首页
-              </Link>
+                <option value="current">当前小老师</option>
+                <option value="needs_maintenance">待维护</option>
+                <option value="archived">已归档小老师</option>
+
+                {cohorts.map((cohort) => (
+                  <option key={cohort.id} value={cohort.id}>
+                    {cohort.name} -{" "}
+                    {cohort.status === "active" ? "运行中" : "已封存"}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="搜索小老师、班级、邮箱..."
+                className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-80"
+              />
             </div>
           </div>
 
-          {message && (
-            <div className="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-              {message}
-            </div>
-          )}
-
-          <section className="grid gap-4 md:grid-cols-4">
-            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-              <p className="text-sm text-stone-500">在任小老师</p>
-              <p className="mt-2 text-3xl font-bold text-emerald-950">
-                {currentTeacherCount}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-              <p className="text-sm text-stone-500">已归档小老师</p>
-              <p className="mt-2 text-3xl font-bold text-emerald-950">
-                {archivedTeacherCount}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-              <p className="text-sm text-stone-500">未绑定账号</p>
-              <p className="mt-2 text-3xl font-bold text-emerald-950">
-                {unboundTeacherCount}
-              </p>
-              <p className="mt-1 text-xs text-stone-500">
-                账号系统接入后会逐步减少
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-              <p className="text-sm text-stone-500">课程记录</p>
-              <p className="mt-2 text-3xl font-bold text-emerald-950">
-                {totalLessonCount}
-              </p>
-            </div>
-          </section>
-
-          <section className="mt-6 rounded-[1.75rem] border border-dashed border-emerald-200 bg-[#fffdf4] p-5 shadow-sm md:p-6">
-            <h2 className="text-xl font-bold text-emerald-950">
-              邮件邀请注册 / 账号绑定
-            </h2>
-
-            <p className="mt-2 text-sm leading-7 text-stone-600">
-              小老师资料应该先通过班级管理导入并绑定到具体班级，避免出现没有任何班级关系的孤立老师档案。正式接入 Supabase Auth 后，这里会用于根据邮箱发送邀请链接。
+          {isLoading ? (
+            <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
+              正在读取小老师数据...
             </p>
+          ) : filteredTeachers.length === 0 ? (
+            <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
+              暂时没有找到符合条件的小老师。
+            </p>
+          ) : (
+            <div className="mt-6 overflow-x-auto rounded-2xl border border-emerald-100">
+              <table className="w-full min-w-[1050px] border-collapse bg-white text-left text-sm">
+                <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">小老师</th>
+                    <th className="px-4 py-3 font-semibold">负责班级</th>
+                    <th className="px-4 py-3 font-semibold">学生</th>
+                    <th className="px-4 py-3 font-semibold">近 30 天</th>
+                    <th className="px-4 py-3 font-semibold">近 4 周</th>
+                    <th className="px-4 py-3 font-semibold">全部课程</th>
+                    <th className="px-4 py-3 font-semibold">最近上课</th>
+                    <th className="px-4 py-3 font-semibold">关注状态</th>
+                    <th className="px-4 py-3 font-semibold">状态</th>
+                    <th className="px-4 py-3 font-semibold">详情</th>
+                  </tr>
+                </thead>
 
-            <div className="mt-5 rounded-2xl bg-white p-4 text-sm text-stone-600">
-              <p className="font-semibold text-emerald-950">
-                当前状态：暂未接入账号创建
-              </p>
+                <tbody className="divide-y divide-emerald-50">
+                  {filteredTeachers.map((teacher) => {
+                    const attention = getAttentionLabel(teacher);
 
-              <div className="mt-3 space-y-2 leading-7">
-                <p>1. 班级管理导入分班表时，系统自动创建小老师档案。</p>
-                <p>2. 小老师必须通过 class_teachers 关系绑定到班级。</p>
-                <p>3. 之后系统根据邮箱发送注册邀请。</p>
-                <p>4. 小老师自己设置密码，不由管理员手动保存密码。</p>
-                <p>5. 登录账号生成后，写入 teachers.auth_user_id。</p>
-              </div>
-            </div>
-          </section>
-
-          <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-              <div>
-                <h2 className="text-xl font-bold text-emerald-950">
-                  小老师列表
-                </h2>
-
-                <p className="mt-2 text-sm leading-7 text-stone-600">
-                  默认显示在任小老师。选择具体届别后，可以查看该届相关小老师，包括已归档成员。
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                <select
-                  value={selectedTeacherView}
-                  onChange={(event) => setSelectedTeacherView(event.target.value)}
-                  className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-64"
-                >
-                  <option value="current">在任小老师</option>
-                  {cohorts.map((cohort) => (
-                    <option key={cohort.id} value={cohort.id}>
-                      {cohort.name}
-                    </option>
-                  ))}
-                </select>
-
-                <input
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="搜索小老师、班级、邮箱..."
-                  className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-80"
-                />
-
-                <button
-                  onClick={() => setIsTeacherListOpen((prev) => !prev)}
-                  className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                >
-                  {isTeacherListOpen ? "收起列表" : "展开列表"}
-                </button>
-              </div>
-            </div>
-
-            {!isTeacherListOpen ? (
-              <div className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
-                小老师列表已收起。当前共有 {filteredTeachers.length} 位符合条件的小老师。
-              </div>
-            ) : isLoading ? (
-              <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
-                正在读取小老师数据...
-              </p>
-            ) : filteredTeachers.length === 0 ? (
-              <p className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">
-                暂时没有找到符合条件的小老师。
-              </p>
-            ) : (
-              <div className="mt-6 overflow-x-auto rounded-2xl border border-emerald-100">
-                <table className="w-full min-w-[1050px] border-collapse bg-white text-left text-sm">
-                  <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">小老师</th>
-                      <th className="px-4 py-3 font-semibold">负责班级</th>
-                      <th className="px-4 py-3 font-semibold">学生</th>
-                      <th className="px-4 py-3 font-semibold">课程</th>
-                      <th className="px-4 py-3 font-semibold">近 4 周</th>
-                      <th className="px-4 py-3 font-semibold">最近上课</th>
-                      <th className="px-4 py-3 font-semibold">状态</th>
-                      <th className="px-4 py-3 font-semibold">账号</th>
-                      <th className="px-4 py-3 font-semibold">操作</th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-emerald-50">
-                    {filteredTeachers.map((teacher) => (
+                    return (
                       <tr key={teacher.id} className="align-top">
                         <td className="px-4 py-4">
                           <p className="font-bold text-emerald-950">
                             {teacher.name}
                           </p>
+
                           <p className="mt-1 text-xs text-stone-500">
                             {teacher.email || "暂未填写邮箱"}
                           </p>
@@ -775,14 +636,16 @@ export default function AdminTeachersPage() {
                             </p>
                           ) : (
                             <div className="space-y-1">
-                              {teacher.classDescriptions.map((description) => (
-                                <p
-                                  key={description}
-                                  className="rounded-full bg-[#fffdf4] px-3 py-1 text-xs text-stone-600"
-                                >
-                                  {description}
-                                </p>
-                              ))}
+                              {teacher.classDescriptions.map(
+                                (description, index) => (
+                                  <p
+                                    key={`${teacher.id}-${description}-${index}`}
+                                    className="rounded-full bg-[#fffdf4] px-3 py-1 text-xs text-stone-600"
+                                  >
+                                    {description}
+                                  </p>
+                                )
+                              )}
                             </div>
                           )}
                         </td>
@@ -791,15 +654,17 @@ export default function AdminTeachersPage() {
                           <p className="font-semibold text-emerald-950">
                             {teacher.studentCount}
                           </p>
+
                           <p className="mt-1 text-xs text-stone-500">名学生</p>
                         </td>
 
                         <td className="px-4 py-4">
-                          <p className="font-semibold text-emerald-950">
-                            {teacher.lessonCount}
+                          <p className="text-2xl font-bold text-emerald-950">
+                            {teacher.recentThirtyDaysLessonCount}
                           </p>
+
                           <p className="mt-1 text-xs text-stone-500">
-                            {formatHours(teacher.totalMinutes)} 小时
+                            次课程
                           </p>
                         </td>
 
@@ -807,8 +672,19 @@ export default function AdminTeachersPage() {
                           <p className="font-semibold text-emerald-950">
                             {teacher.recentFourWeeksCount}/4 周
                           </p>
+
                           <p className="mt-1 text-xs text-stone-500">
-                            暂不判断是否需关注
+                            活跃周数
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <p className="font-semibold text-emerald-950">
+                            {teacher.lessonCount}
+                          </p>
+
+                          <p className="mt-1 text-xs text-stone-500">
+                            {formatHours(teacher.totalMinutes)} 小时
                           </p>
                         </td>
 
@@ -816,6 +692,14 @@ export default function AdminTeachersPage() {
                           <p className="text-sm text-stone-700">
                             {teacher.recentLessonDate || "暂无记录"}
                           </p>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${attention.className}`}
+                          >
+                            {attention.text}
+                          </span>
                         </td>
 
                         <td className="px-4 py-4">
@@ -829,128 +713,22 @@ export default function AdminTeachersPage() {
                         </td>
 
                         <td className="px-4 py-4">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              teacher.authUserId
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-stone-100 text-stone-500"
-                            }`}
+                          <Link
+                            href={`/admin/teachers/${teacher.id}`}
+                            className="rounded-full border border-emerald-700 px-3 py-1.5 text-center text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
                           >
-                            {teacher.authUserId ? "已绑定" : "未绑定"}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-4">
-                          <div className="flex flex-col gap-2">
-                            <Link
-                              href={`/admin/teachers/${teacher.id}`}
-                              className="rounded-full border border-emerald-700 px-3 py-1.5 text-center text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                            >
-                              查看详情
-                            </Link>
-
-                            {teacher.status !== "archived" &&
-                              teacher.status !== "delete_requested" && (
-                                <button
-                                  onClick={() =>
-                                    handleRequestDeleteTeacher(
-                                      teacher.id,
-                                      teacher.name
-                                    )
-                                  }
-                                  className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-                                >
-                                  删除申请
-                                </button>
-                              )}
-
-                            {teacher.status === "delete_requested" && (
-                              <p className="text-xs text-red-500">等待确认</p>
-                            )}
-
-                            {teacher.status === "archived" && (
-                              <p className="text-xs text-stone-500">
-                                已归档，不可修改
-                              </p>
-                            )}
-                          </div>
+                            查看详情
+                          </Link>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
-          <section
-            id="danger-zone"
-            className="mt-10 rounded-[1.75rem] border border-red-100 bg-white p-5 shadow-sm md:p-6"
-          >
-            <h2 className="text-xl font-bold text-emerald-950">高风险操作</h2>
-
-            <p className="mt-2 text-sm leading-7 text-stone-600">
-              这里仅处理单个小老师的删除申请。整届归档请在班级管理中通过“学年结束与整届封存”统一完成。
-              同一位管理员不能重复确认同一项申请。
-            </p>
-
-            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
-              <p className="font-semibold text-emerald-950">当前确认管理员</p>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                现在还没有正式登录系统，所以先用管理员姓名模拟。之后接入 Auth 后，会自动使用当前登录管理员账号。
-              </p>
-
-              <input
-                value={currentAdminName}
-                onChange={(event) => setCurrentAdminName(event.target.value)}
-                placeholder="填写当前管理员姓名，例如 Ethan"
-                className="mt-3 w-full rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 md:w-96"
-              />
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-
-            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-4">
-              <p className="font-semibold text-emerald-950">待确认操作</p>
-
-              {pendingRequests.length === 0 ? (
-                <p className="mt-3 text-sm text-stone-600">暂无待确认操作。</p>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  {pendingRequests.map((request) => (
-                    <div key={request.id} className="rounded-2xl bg-white p-4">
-                      <p className="font-semibold text-emerald-950">
-                        {getActionLabel(request.action_type)}：
-                        {request.target_name}
-                      </p>
-
-                      <p className="mt-1 text-xs text-stone-500">
-                        已确认 {request.approvals_count}/
-                        {request.required_approvals}
-                      </p>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          onClick={() => handleApproveTeacherRequest(request)}
-                          className="rounded-full bg-[#2f5d50] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-900"
-                        >
-                          确认一次
-                        </button>
-
-                        <button
-                          onClick={() => handleCancelRequest(request)}
-                          className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-50"
-                        >
-                          撤回申请
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
+          )}
         </section>
-      </main>
-    </AdminGuard>
+      </section>
+    </main>
   );
 }

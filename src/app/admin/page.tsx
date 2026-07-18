@@ -57,10 +57,9 @@ const navItems = [
   ["班级管理", "/admin/classes"],
   ["小老师管理", "/admin/teachers"],
   ["学生管理", "/admin/students"],
-  ["课程记录", "/admin/records"],
-  ["教学目标", "/admin/goals"],
   ["留言中心", "/admin/messages"],
   ["数据统计", "/admin/stats"],
+  ["维护中心", "/admin/maintenance"]
 ];
 
 const initialStats: AdminStat[] = [
@@ -909,15 +908,7 @@ function AdminHomeContent() {
                 {pendingRequests.map((request) => (
                   <Link
                     key={request.id}
-                    href={
-                      request.action_type === "archive_cohort"
-                        ? "/admin/classes"
-                        : request.action_type === "delete_class"
-                        ? "/admin/classes"
-                        : request.action_type === "create_class"
-                        ? "/admin/classes"
-                        : "/admin"
-                    }
+                    href="/admin/maintenance"
                     className="block rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4 transition hover:border-emerald-300 hover:bg-white"
                   >
                     <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
@@ -928,8 +919,7 @@ function AdminHomeContent() {
                           </span>
 
                           <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-500">
-                            {request.approvals_count}/
-                            {request.required_approvals} 已确认
+                            {request.approvals_count}/{request.required_approvals} 已确认
                           </span>
                         </div>
 
@@ -938,13 +928,12 @@ function AdminHomeContent() {
                         </h3>
 
                         <p className="mt-2 text-sm leading-6 text-stone-600">
-                          {request.note ||
-                            "需要管理员进入对应模块继续确认或取消。"}
+                          {request.note || "需要管理员进入维护中心继续确认或取消。"}
                         </p>
                       </div>
 
                       <span className="text-sm font-semibold text-emerald-700">
-                        去处理 →
+                        去维护中心 →
                       </span>
                     </div>
                   </Link>

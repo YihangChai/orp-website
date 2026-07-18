@@ -8,9 +8,10 @@ import AdminGuard, { useCurrentAdmin } from "@/components/AdminGuard";
 /**
  * admin/classes 页面原则：
  * 1. AdminGuard 负责确认当前用户是否是管理员。
- * 2. 本页面只负责班级日常管理。
- * 3. 批量导入、账号创建、初始密码生成、老师学生绑定，统一迁移到 /admin/import。
- * 4. 本页面不再通过姓名直接创建 teacher/student，避免产生没有 auth_user_id 的半账号。
+ * 2. 本页面只负责班级统计、查询和详情入口。
+ * 3. 批量导入、账号创建、初始密码生成、老师学生绑定，统一放在 /admin/import。
+ * 4. 班级基础信息修改、人员调整、删除/恢复等维护操作，统一放到后续的 /admin/maintenance。
+ * 5. 本页面仅保留“整届封存”作为学年结束时的集中操作。
  */
 
 type ClassTableItem = {
@@ -43,22 +44,18 @@ type AdminActionRequest = {
 };
 
 const TOTAL_ADMIN_COUNT = 1;
-const DELETE_CLASS_REQUIRED_APPROVALS = 1;
-
-function normalizeName(name: string) {
-  return name.trim().replace(/\s+/g, "").toLowerCase();
-}
 
 function getStatusLabel(status: string) {
   if (status === "active") return "运行中";
   if (status === "archived") return "已封存";
-  if (status === "delete_requested") return "删除申请中";
+  if (status === "delete_requested") return "待维护";
   return status;
 }
 
 function getStatusClassName(status: string) {
   if (status === "active") return "bg-emerald-50 text-emerald-700";
-  if (status === "delete_requested") return "bg-red-50 text-red-700";
+  if (status === "archived") return "bg-stone-100 text-stone-500";
+  if (status === "delete_requested") return "bg-amber-50 text-amber-700";
   return "bg-stone-100 text-stone-500";
 }
 
@@ -84,11 +81,6 @@ function AdminClassesContent() {
   const [isClassListOpen, setIsClassListOpen] = useState(true);
   const [selectedClassView, setSelectedClassView] = useState("active");
 
-  const [editingClassId, setEditingClassId] = useState<string | null>(null);
-  const [editClassName, setEditClassName] = useState("");
-  const [editSchool, setEditSchool] = useState("");
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
-
   const [selectedArchiveCohortId, setSelectedArchiveCohortId] = useState("");
   const [isArchivingCohort, setIsArchivingCohort] = useState(false);
 
@@ -100,18 +92,22 @@ function AdminClassesContent() {
     return classes.filter((classItem) => classItem.status === "archived");
   }, [classes]);
 
-  const deleteRequestedClasses = useMemo(() => {
+  const needsMaintenanceClasses = useMemo(() => {
     return classes.filter(
-      (classItem) => classItem.status === "delete_requested"
+      (classItem) =>
+        classItem.status !== "active" && classItem.status !== "archived"
     );
   }, [classes]);
 
   const filteredClasses = useMemo(() => {
     return classes.filter((classItem) => {
       if (selectedClassView === "active") {
+        return classItem.status === "active";
+      }
+
+      if (selectedClassView === "needs_maintenance") {
         return (
-          classItem.status === "active" ||
-          classItem.status === "delete_requested"
+          classItem.status !== "active" && classItem.status !== "archived"
         );
       }
 
@@ -126,16 +122,6 @@ function AdminClassesContent() {
         request.target_type === "cohort"
     );
   }, [requests]);
-
-  function getClassDeleteRequest(classId: string) {
-    return requests.find(
-      (request) =>
-        request.action_type === "delete_class" &&
-        request.target_type === "class" &&
-        request.target_id === classId &&
-        request.status === "pending"
-    );
-  }
 
   async function fetchCohorts() {
     const { data, error } = await supabase
@@ -166,10 +152,12 @@ function AdminClassesContent() {
         "id, action_type, target_type, target_id, target_name, status, approvals_count, required_approvals, note"
       )
       .eq("status", "pending")
+      .eq("action_type", "archive_cohort")
+      .eq("target_type", "cohort")
       .order("created_at", { ascending: false });
 
     if (error) {
-      throw new Error(`读取操作申请失败：${error.message}`);
+      throw new Error(`读取整届封存申请失败：${error.message}`);
     }
 
     setRequests((data || []) as AdminActionRequest[]);
@@ -305,258 +293,6 @@ function AdminClassesContent() {
     return approvalCount;
   }
 
-  function startEditingClass(classItem: ClassTableItem) {
-    setEditingClassId(classItem.id);
-    setEditClassName(classItem.name);
-    setEditSchool(classItem.school || "");
-    setMessage("");
-  }
-
-  function cancelEditingClass() {
-    setEditingClassId(null);
-    setEditClassName("");
-    setEditSchool("");
-    setMessage("");
-  }
-
-  async function saveClassEdit(classId: string) {
-    const newClassName = editClassName.trim();
-    const newSchool = editSchool.trim();
-
-    if (!newClassName) {
-      setMessage("保存失败：班级名称不能为空。");
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "确认保存班级基础信息吗？这不会修改老师、学生绑定关系，也不会影响历史课程记录。"
-    );
-
-    if (!confirmed) return;
-
-    setIsSavingEdit(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase
-        .from("classes")
-        .update({
-          name: newClassName,
-          normalized_name: normalizeName(newClassName),
-          school: newSchool || null,
-        })
-        .eq("id", classId);
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      setMessage("班级基础信息已保存。老师和学生账号关系没有被修改。");
-      cancelEditingClass();
-      await refreshData();
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? `保存失败：${error.message}`
-          : "保存失败：未知错误。"
-      );
-    } finally {
-      setIsSavingEdit(false);
-    }
-  }
-
-  async function requestDeleteClass(classId: string, className: string) {
-    const confirmed = window.confirm(
-      `确认提交删除申请吗？\n\n班级：${className}\n\n这一步不会真正删除班级，只会把它标记为“删除申请中”。正式删除需要两位管理员确认。`
-    );
-
-    if (!confirmed) return;
-
-    const { error: requestError } = await supabase
-      .from("admin_action_requests")
-      .insert({
-        action_type: "delete_class",
-        target_type: "class",
-        target_id: classId,
-        target_name: className,
-        status: "pending",
-        approvals_count: 0,
-        required_approvals: DELETE_CLASS_REQUIRED_APPROVALS,
-        requested_by: currentAdminName,
-        note: "申请删除错建班级",
-      });
-
-    if (requestError) {
-      setMessage(`提交删除申请失败：${requestError.message}`);
-      return;
-    }
-
-    const { error: classError } = await supabase
-      .from("classes")
-      .update({
-        status: "delete_requested",
-      })
-      .eq("id", classId);
-
-    if (classError) {
-      setMessage(`更新班级状态失败：${classError.message}`);
-      return;
-    }
-
-    setMessage("删除申请已提交。班级和历史数据暂时都没有被删除。");
-    await refreshData();
-  }
-
-  async function cancelDeleteRequest(classId: string, className: string) {
-    const confirmed = window.confirm(
-      `确认撤回删除申请吗？\n\n班级：${className}\n\n撤回后，这个班级会恢复为运行中。`
-    );
-
-    if (!confirmed) return;
-
-    const request = getClassDeleteRequest(classId);
-
-    if (request) {
-      const { error: approvalError } = await supabase
-        .from("admin_action_approvals")
-        .delete()
-        .eq("request_id", request.id);
-
-      if (approvalError) {
-        setMessage(`清除确认记录失败：${approvalError.message}`);
-        return;
-      }
-
-      const { error: requestError } = await supabase
-        .from("admin_action_requests")
-        .update({
-          status: "canceled",
-          approvals_count: 0,
-          note: "删除申请已撤回。",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", request.id);
-
-      if (requestError) {
-        setMessage(`撤回删除申请失败：${requestError.message}`);
-        return;
-      }
-    }
-
-    const { error: classError } = await supabase
-      .from("classes")
-      .update({
-        status: "active",
-      })
-      .eq("id", classId);
-
-    if (classError) {
-      setMessage(`恢复班级状态失败：${classError.message}`);
-      return;
-    }
-
-    setMessage("删除申请已撤回，班级恢复为运行中。");
-    await refreshData();
-  }
-
-  async function approveDeleteClass(classItem: ClassTableItem) {
-    const request = getClassDeleteRequest(classItem.id);
-
-    if (!request) {
-      setMessage("没有找到这个班级的删除申请。");
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `确认批准删除申请吗？\n\n班级：${classItem.name}\n当前确认数：${request.approvals_count}/${request.required_approvals}`
-    );
-
-    if (!confirmed) return;
-
-    const approvalCount = await registerApproval(request);
-
-    if (approvalCount === null) return;
-
-    if (approvalCount < request.required_approvals) {
-      setMessage(
-        `已记录一次确认。删除申请还需要 ${
-          request.required_approvals - approvalCount
-        } 次确认。`
-      );
-
-      await refreshData();
-      return;
-    }
-
-    const { count: lessonCount, error: lessonError } = await supabase
-      .from("lesson_records")
-      .select("id", { count: "exact", head: true })
-      .eq("class_id", classItem.id);
-
-    if (lessonError) {
-      setMessage(
-        `删除前检查失败：${lessonError.message}。为了保护历史记录，系统没有删除班级。`
-      );
-      return;
-    }
-
-    if ((lessonCount || 0) > 0) {
-      const { error: archiveError } = await supabase
-        .from("classes")
-        .update({
-          status: "archived",
-        })
-        .eq("id", classItem.id);
-
-      if (archiveError) {
-        setMessage(`班级有课程记录，转为封存失败：${archiveError.message}`);
-        return;
-      }
-
-      await supabase
-        .from("admin_action_requests")
-        .update({
-          approvals_count: approvalCount,
-          status: "completed",
-          note: "班级已有课程记录，系统未真删除，已改为封存。",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", request.id);
-
-      setMessage(
-        "这个班级已有课程记录，系统没有真正删除，而是改为封存。历史课程记录仍然保留。"
-      );
-
-      await refreshData();
-      return;
-    }
-
-    await supabase.from("class_teachers").delete().eq("class_id", classItem.id);
-    await supabase.from("class_students").delete().eq("class_id", classItem.id);
-
-    const { error: deleteClassError } = await supabase
-      .from("classes")
-      .delete()
-      .eq("id", classItem.id);
-
-    if (deleteClassError) {
-      setMessage(`正式删除失败：${deleteClassError.message}`);
-      return;
-    }
-
-    await supabase
-      .from("admin_action_requests")
-      .update({
-        approvals_count: approvalCount,
-        status: "completed",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", request.id);
-
-    setMessage("班级已正式删除。这个删除只适用于没有课程记录的错建班级。");
-    await refreshData();
-  }
-
   async function archiveSelectedCohort() {
     const cohort = cohorts.find(
       (cohortItem) => cohortItem.id === selectedArchiveCohortId
@@ -564,6 +300,11 @@ function AdminClassesContent() {
 
     if (!cohort) {
       setMessage("请先选择要封存的届别。");
+      return;
+    }
+
+    if (cohort.status === "archived") {
+      setMessage("这个届别已经是已封存状态，不需要重复封存。");
       return;
     }
 
@@ -580,14 +321,19 @@ function AdminClassesContent() {
     setMessage("");
 
     try {
-      const { data: existingRequest } = await supabase
-        .from("admin_action_requests")
-        .select("id")
-        .eq("action_type", "archive_cohort")
-        .eq("target_type", "cohort")
-        .eq("target_id", cohort.id)
-        .eq("status", "pending")
-        .maybeSingle();
+      const { data: existingRequest, error: existingRequestError } =
+        await supabase
+          .from("admin_action_requests")
+          .select("id")
+          .eq("action_type", "archive_cohort")
+          .eq("target_type", "cohort")
+          .eq("target_id", cohort.id)
+          .eq("status", "pending")
+          .maybeSingle();
+
+      if (existingRequestError) {
+        throw new Error(existingRequestError.message);
+      }
 
       if (existingRequest) {
         setMessage("这个届别已经有封存申请，不需要重复提交。");
@@ -879,9 +625,12 @@ function AdminClassesContent() {
         <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
-              班级与分班管理
+              班级与分班查询
             </h1>
 
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
+              本页面只用于查看班级、届别、小老师和学生分布情况。班级信息修改、人员调整、密码重置、删除恢复等维护操作会统一放到维护中心处理。
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -901,20 +650,12 @@ function AdminClassesContent() {
           </div>
         </div>
 
-        <section className="mb-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <p className="font-semibold text-emerald-900">当前管理员</p>
-
-          <div className="mt-3 w-fit rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800">
-            {currentAdmin.name}
-          </div>
-        </section>
 
         {message && (
           <div className="mb-6 rounded-2xl border border-emerald-100 bg-white p-4 text-sm font-semibold text-emerald-800 shadow-sm">
             {message}
           </div>
         )}
-
 
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
@@ -935,7 +676,8 @@ function AdminClassesContent() {
                   onChange={(event) => setSelectedClassView(event.target.value)}
                   className="w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-2.5 text-sm outline-none focus:border-emerald-500 md:w-64"
                 >
-                  <option value="active">当前运行中 / 待处理班级</option>
+                  <option value="active">当前运行中班级</option>
+                  <option value="needs_maintenance">待维护状态班级</option>
 
                   {cohorts.map((cohort) => (
                     <option key={cohort.id} value={cohort.id}>
@@ -963,8 +705,8 @@ function AdminClassesContent() {
                   已封存 {archivedClasses.length}
                 </span>
 
-                <span className="w-fit rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700">
-                  删除申请 {deleteRequestedClasses.length}
+                <span className="w-fit rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
+                  待维护 {needsMaintenanceClasses.length}
                 </span>
 
                 <span className="w-fit rounded-full bg-[#fffdf4] px-3 py-1.5 text-xs font-semibold text-stone-600">
@@ -985,7 +727,7 @@ function AdminClassesContent() {
             </p>
           ) : (
             <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100">
-              <table className="w-full min-w-[1150px] border-collapse bg-white text-left text-sm">
+              <table className="w-full min-w-[1000px] border-collapse bg-white text-left text-sm">
                 <thead className="bg-[#fffdf4] text-stone-600">
                   <tr>
                     <th className="px-4 py-3 font-semibold">届别</th>
@@ -995,220 +737,75 @@ function AdminClassesContent() {
                     <th className="px-4 py-3 font-semibold">学生名单</th>
                     <th className="px-4 py-3 font-semibold">人数</th>
                     <th className="px-4 py-3 font-semibold">状态</th>
-                    <th className="px-4 py-3 font-semibold">删除流程</th>
-                    <th className="px-4 py-3 font-semibold">操作</th>
+                    <th className="px-4 py-3 font-semibold">详情</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredClasses.map((classItem) => {
-                    const deleteRequest = getClassDeleteRequest(classItem.id);
+                  {filteredClasses.map((classItem) => (
+                    <tr
+                      key={classItem.id}
+                      className="border-t border-emerald-50"
+                    >
+                      <td className="px-4 py-4 align-top text-stone-600">
+                        {classItem.cohortName}
+                      </td>
 
-                    return (
-                      <tr
-                        key={classItem.id}
-                        className="border-t border-emerald-50"
-                      >
-                        {editingClassId === classItem.id ? (
-                          <>
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              {classItem.cohortName}
-                            </td>
+                      <td className="px-4 py-4 align-top font-bold text-emerald-950">
+                        {classItem.name}
+                      </td>
 
-                            <td className="px-4 py-4 align-top">
-                              <input
-                                value={editClassName}
-                                onChange={(event) =>
-                                  setEditClassName(event.target.value)
-                                }
-                                className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm font-semibold outline-none focus:border-emerald-500"
-                              />
-                            </td>
+                      <td className="px-4 py-4 align-top text-stone-600">
+                        {classItem.school || "暂未填写"}
+                      </td>
 
-                            <td className="px-4 py-4 align-top">
-                              <input
-                                value={editSchool}
-                                onChange={(event) =>
-                                  setEditSchool(event.target.value)
-                                }
-                                className="w-full rounded-xl border border-emerald-100 bg-[#fffdf4] px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                                placeholder="合作学校"
-                              />
-                            </td>
+                      <td className="px-4 py-4 align-top text-stone-600">
+                        {classItem.teacherNames.length > 0
+                          ? classItem.teacherNames.join("、")
+                          : "暂未分配"}
+                      </td>
 
-                            <td className="px-4 py-4 align-top text-stone-500">
-                              老师绑定请到账号管理模块修改
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-500">
-                              学生绑定请到账号管理模块修改
-                            </td>
-
-                            <td className="px-4 py-4 align-top font-semibold text-stone-700">
-                              {classItem.studentNames.length}
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                                编辑中
-                              </span>
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-400">
-                              暂停操作
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <div className="flex flex-col gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => saveClassEdit(classItem.id)}
-                                  disabled={isSavingEdit}
-                                  className="rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {isSavingEdit ? "保存中" : "保存"}
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={cancelEditingClass}
-                                  className="rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
-                                >
-                                  取消
-                                </button>
-                              </div>
-                            </td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              {classItem.cohortName}
-                            </td>
-
-                            <td className="px-4 py-4 align-top font-bold text-emerald-950">
-                              {classItem.name}
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              {classItem.school || "暂未填写"}
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              {classItem.teacherNames.length > 0
-                                ? classItem.teacherNames.join("、")
-                                : "暂未分配"}
-                            </td>
-
-                            <td className="px-4 py-4 align-top text-stone-600">
-                              <div className="flex flex-wrap gap-2">
-                                {classItem.studentNames.length > 0 ? (
-                                  classItem.studentNames.map((studentName) => (
-                                    <span
-                                      key={studentName}
-                                      className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
-                                    >
-                                      {studentName}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-stone-400">
-                                    暂无学生
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-4 align-top font-semibold text-stone-700">
-                              {classItem.studentNames.length}
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
+                      <td className="px-4 py-4 align-top text-stone-600">
+                        <div className="flex flex-wrap gap-2">
+                          {classItem.studentNames.length > 0 ? (
+                            classItem.studentNames.map((studentName, index) => (
                               <span
-                                className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClassName(
-                                  classItem.status
-                                )}`}
+                                key={`${classItem.id}-${studentName}-${index}`}
+                                className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
                               >
-                                {getStatusLabel(classItem.status)}
+                                {studentName}
                               </span>
-                            </td>
+                            ))
+                          ) : (
+                            <span className="text-stone-400">暂无学生</span>
+                          )}
+                        </div>
+                      </td>
 
-                            <td className="px-4 py-4 align-top">
-                              {deleteRequest ? (
-                                <div className="space-y-2">
-                                  <p className="text-xs font-semibold text-red-700">
-                                    {deleteRequest.approvals_count}/
-                                    {deleteRequest.required_approvals} 已确认
-                                  </p>
+                      <td className="px-4 py-4 align-top font-semibold text-stone-700">
+                        {classItem.studentNames.length}
+                      </td>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => approveDeleteClass(classItem)}
-                                    className="rounded-full border border-red-100 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-                                  >
-                                    确认删除
-                                  </button>
+                      <td className="px-4 py-4 align-top">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClassName(
+                            classItem.status
+                          )}`}
+                        >
+                          {getStatusLabel(classItem.status)}
+                        </span>
+                      </td>
 
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      cancelDeleteRequest(
-                                        classItem.id,
-                                        classItem.name
-                                      )
-                                    }
-                                    className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-50"
-                                  >
-                                    撤回申请
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-stone-400">
-                                  无申请
-                                </span>
-                              )}
-                            </td>
-
-                            <td className="px-4 py-4 align-top">
-                              <div className="flex flex-col gap-2">
-                                <Link
-                                  href={`/admin/classes/${classItem.id}`}
-                                  className="rounded-full bg-[#2f5d50] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-emerald-900"
-                                >
-                                  查看详情
-                                </Link>
-
-                                {classItem.status !== "archived" && (
-                                  <button
-                                    type="button"
-                                    onClick={() => startEditingClass(classItem)}
-                                    className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                                  >
-                                    编辑基础信息
-                                  </button>
-                                )}
-
-                                {!deleteRequest &&
-                                  classItem.status !== "archived" && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        requestDeleteClass(
-                                          classItem.id,
-                                          classItem.name
-                                        )
-                                      }
-                                      className="rounded-full border border-red-100 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
-                                    >
-                                      申请删除
-                                    </button>
-                                  )}
-                              </div>
-                            </td>
-                          </>
-                        )}
-                      </tr>
-                    );
-                  })}
+                      <td className="px-4 py-4 align-top">
+                        <Link
+                          href={`/admin/classes/${classItem.id}`}
+                          className="rounded-full bg-[#2f5d50] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-emerald-900"
+                        >
+                          查看详情
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
