@@ -1,19 +1,45 @@
 export type ParsedImportRow = {
   rowNumber: number;
+  lineNumber: number;
+
   cohortName: string;
   className: string;
   school: string;
+
   teacherName: string;
   teacherEnteringYear: string;
-  studentName: string;
+
+  studentNames: string[];
   studentGrade: string;
+
+  rawLine: string;
 };
 
 export type PreviewImportRow = ParsedImportRow & {
   teacherEmailPrefix: string;
   teacherEmail: string;
+};
+
+export type ExecutionImportRow = {
+  rowNumber: number;
+  lineNumber: number;
+
+  cohortName: string;
+  className: string;
+  school: string;
+
+  teacherName: string;
+  teacherEnteringYear: string;
+  teacherEmailPrefix: string;
+  teacherEmail: string;
+
+  studentName: string;
+  studentNames: string[];
+  studentGrade: string;
   studentUsername: string;
   studentAuthEmail: string;
+
+  rawLine: string;
 };
 
 export type ImportValidationError = {
@@ -26,6 +52,7 @@ export type ImportPreviewSummary = {
   classCount: number;
   teacherCount: number;
   studentCount: number;
+  studentSeatCount: number;
 };
 
 export type BulkImportAccountItem = {

@@ -3,12 +3,8 @@ import { generateInitialPassword } from "./generateInitialPassword";
 import type {
   BulkImportAccountItem,
   BulkImportResult,
-  PreviewImportRow,
+  ExecutionImportRow,
 } from "./types";
-
-function normalizeName(name: string) {
-  return name.trim().replace(/\s+/g, "").toLowerCase();
-}
 
 type ExecuteBulkImportOptions = {
   allowReuseArchived?: boolean;
@@ -42,8 +38,30 @@ type StudentRecord = {
   status: string | null;
 };
 
+function safeText(value: unknown) {
+  if (typeof value === "string") return value.trim();
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function normalizeName(name: unknown) {
+  return safeText(name).replace(/\s+/g, "").toLowerCase();
+}
+
+function getTeacherEmail(row: ExecutionImportRow) {
+  return safeText(row.teacherEmail).toLowerCase();
+}
+
+function getStudentUsername(row: ExecutionImportRow) {
+  return safeText(row.studentUsername).toLowerCase();
+}
+
+function getStudentAuthEmail(row: ExecutionImportRow) {
+  return safeText(row.studentAuthEmail).toLowerCase();
+}
+
 async function getOrCreateCohort(cohortName: string) {
-  const trimmedCohortName = cohortName.trim();
+  const trimmedCohortName = safeText(cohortName);
   const normalizedCohortName = normalizeName(trimmedCohortName);
 
   const { data: existingCohort, error: existingError } = await supabaseAdmin
@@ -88,7 +106,7 @@ async function getOrCreateClass(
   className: string,
   school: string
 ) {
-  const trimmedClassName = className.trim();
+  const trimmedClassName = safeText(className);
   const normalizedClassName = normalizeName(trimmedClassName);
 
   const { data: existingClass, error: existingError } = await supabaseAdmin
@@ -115,7 +133,7 @@ async function getOrCreateClass(
       cohort_id: cohortId,
       name: trimmedClassName,
       normalized_name: normalizedClassName,
-      school: school.trim() || null,
+      school: safeText(school) || null,
       status: "active",
     })
     .select("id, name")
@@ -132,10 +150,14 @@ async function getOrCreateClass(
 }
 
 async function getOrCreateTeacher(
-  row: PreviewImportRow,
+  row: ExecutionImportRow,
   options: ExecuteBulkImportOptions
 ) {
-  const email = row.teacherEmail.trim().toLowerCase();
+  const email = getTeacherEmail(row);
+
+  if (!email) {
+    throw new Error(`第 ${row.rowNumber} 行缺少小老师邮箱。`);
+  }
 
   const { data: existingTeacher, error: existingError } = await supabaseAdmin
     .from("teachers")
@@ -205,7 +227,7 @@ async function getOrCreateTeacher(
   const { data: newTeacher, error: teacherError } = await supabaseAdmin
     .from("teachers")
     .insert({
-      name: row.teacherName.trim(),
+      name: safeText(row.teacherName),
       email,
       auth_user_id: authData.user.id,
       school_entering_year: Number(row.teacherEnteringYear),
@@ -228,10 +250,19 @@ async function getOrCreateTeacher(
 }
 
 async function getOrCreateStudent(
-  row: PreviewImportRow,
+  row: ExecutionImportRow,
   options: ExecuteBulkImportOptions
 ) {
-  const username = row.studentUsername.trim().toLowerCase();
+  const username = getStudentUsername(row);
+  const authEmail = getStudentAuthEmail(row);
+
+  if (!username) {
+    throw new Error(`第 ${row.rowNumber} 行缺少学生用户名。`);
+  }
+
+  if (!authEmail) {
+    throw new Error(`第 ${row.rowNumber} 行缺少学生登录邮箱。`);
+  }
 
   const { data: existingStudent, error: existingError } = await supabaseAdmin
     .from("students")
@@ -287,7 +318,7 @@ async function getOrCreateStudent(
 
   const { data: authData, error: authError } =
     await supabaseAdmin.auth.admin.createUser({
-      email: row.studentAuthEmail.trim().toLowerCase(),
+      email: authEmail,
       password: initialPassword,
       email_confirm: true,
     });
@@ -301,10 +332,10 @@ async function getOrCreateStudent(
   const { data: newStudent, error: studentError } = await supabaseAdmin
     .from("students")
     .insert({
-      name: row.studentName.trim(),
+      name: safeText(row.studentName),
       username,
       auth_user_id: authData.user.id,
-      grade: row.studentGrade.trim(),
+      grade: safeText(row.studentGrade),
       status: "active",
       must_change_password: false,
     })
@@ -356,7 +387,7 @@ async function bindStudentToClass(classId: string, studentId: string) {
 }
 
 export async function executeBulkImport(
-  rows: PreviewImportRow[],
+  rows: ExecutionImportRow[],
   options: ExecuteBulkImportOptions = {}
 ): Promise<BulkImportResult> {
   let createdClasses = 0;
@@ -372,6 +403,9 @@ export async function executeBulkImport(
 
   const processedClassKeys = new Set<string>();
   const processedTeacherEmails = new Set<string>();
+  const processedStudentUsernames = new Set<string>();
+  const processedTeacherBindingKeys = new Set<string>();
+  const processedStudentBindingKeys = new Set<string>();
 
   for (const row of rows) {
     try {
@@ -392,7 +426,7 @@ export async function executeBulkImport(
       processedClassKeys.add(classKey);
 
       const teacherResult = await getOrCreateTeacher(row, options);
-      const teacherEmailKey = row.teacherEmail.trim().toLowerCase();
+      const teacherEmailKey = getTeacherEmail(row);
 
       if (!processedTeacherEmails.has(teacherEmailKey)) {
         if (teacherResult.created) {
@@ -400,10 +434,10 @@ export async function executeBulkImport(
 
           accounts.push({
             role: "teacher",
-            name: row.teacherName,
-            loginAccount: row.teacherEmail,
+            name: safeText(row.teacherName),
+            loginAccount: teacherEmailKey,
             initialPassword: teacherResult.initialPassword || "",
-            className: row.className,
+            className: safeText(row.className),
             status: "created",
           });
         } else if (teacherResult.restored) {
@@ -412,10 +446,10 @@ export async function executeBulkImport(
 
           accounts.push({
             role: "teacher",
-            name: teacherResult.teacher.name || row.teacherName,
-            loginAccount: teacherResult.teacher.email || row.teacherEmail,
+            name: teacherResult.teacher.name || safeText(row.teacherName),
+            loginAccount: teacherResult.teacher.email || teacherEmailKey,
             initialPassword: "",
-            className: row.className,
+            className: safeText(row.className),
             status: "restored",
             message: "小老师账号已从 archived 恢复为 active，并复用原账号。",
           });
@@ -424,10 +458,10 @@ export async function executeBulkImport(
 
           accounts.push({
             role: "teacher",
-            name: teacherResult.teacher.name || row.teacherName,
-            loginAccount: teacherResult.teacher.email || row.teacherEmail,
+            name: teacherResult.teacher.name || safeText(row.teacherName),
+            loginAccount: teacherResult.teacher.email || teacherEmailKey,
             initialPassword: "",
-            className: row.className,
+            className: safeText(row.className),
             status: "existing",
             message: "小老师账号已存在，系统复用原账号，不会显示原密码。",
           });
@@ -436,60 +470,76 @@ export async function executeBulkImport(
         processedTeacherEmails.add(teacherEmailKey);
       }
 
-      await bindTeacherToClass(classItem.id, teacherResult.teacher.id);
-      teacherBindings += 1;
+      const teacherBindingKey = `${classItem.id}__${teacherResult.teacher.id}`;
 
-      const studentResult = await getOrCreateStudent(row, options);
-
-      if (studentResult.created) {
-        createdStudents += 1;
-
-        accounts.push({
-          role: "student",
-          name: row.studentName,
-          loginAccount: row.studentUsername,
-          initialPassword: studentResult.initialPassword || "",
-          className: row.className,
-          status: "created",
-        });
-      } else if (studentResult.restored) {
-        restoredAccounts += 1;
-        skippedExisting += 1;
-
-        accounts.push({
-          role: "student",
-          name: studentResult.student.name || row.studentName,
-          loginAccount: studentResult.student.username || row.studentUsername,
-          initialPassword: "",
-          className: row.className,
-          status: "restored",
-          message: "学生账号已从 archived 恢复为 active，并复用原账号。",
-        });
-      } else {
-        skippedExisting += 1;
-
-        accounts.push({
-          role: "student",
-          name: studentResult.student.name || row.studentName,
-          loginAccount: studentResult.student.username || row.studentUsername,
-          initialPassword: "",
-          className: row.className,
-          status: "existing",
-          message: "学生账号已存在，系统复用原账号，不会显示原密码。",
-        });
+      if (!processedTeacherBindingKeys.has(teacherBindingKey)) {
+        await bindTeacherToClass(classItem.id, teacherResult.teacher.id);
+        teacherBindings += 1;
+        processedTeacherBindingKeys.add(teacherBindingKey);
       }
 
-      await bindStudentToClass(classItem.id, studentResult.student.id);
-      studentBindings += 1;
+      const studentResult = await getOrCreateStudent(row, options);
+      const studentUsernameKey = getStudentUsername(row);
+
+      if (!processedStudentUsernames.has(studentUsernameKey)) {
+        if (studentResult.created) {
+          createdStudents += 1;
+
+          accounts.push({
+            role: "student",
+            name: safeText(row.studentName),
+            loginAccount: studentUsernameKey,
+            initialPassword: studentResult.initialPassword || "",
+            className: safeText(row.className),
+            status: "created",
+          });
+        } else if (studentResult.restored) {
+          restoredAccounts += 1;
+          skippedExisting += 1;
+
+          accounts.push({
+            role: "student",
+            name: studentResult.student.name || safeText(row.studentName),
+            loginAccount: studentResult.student.username || studentUsernameKey,
+            initialPassword: "",
+            className: safeText(row.className),
+            status: "restored",
+            message: "学生账号已从 archived 恢复为 active，并复用原账号。",
+          });
+        } else {
+          skippedExisting += 1;
+
+          accounts.push({
+            role: "student",
+            name: studentResult.student.name || safeText(row.studentName),
+            loginAccount: studentResult.student.username || studentUsernameKey,
+            initialPassword: "",
+            className: safeText(row.className),
+            status: "existing",
+            message: "学生账号已存在，系统复用原账号，不会显示原密码。",
+          });
+        }
+
+        processedStudentUsernames.add(studentUsernameKey);
+      }
+
+      const studentBindingKey = `${classItem.id}__${studentResult.student.id}`;
+
+      if (!processedStudentBindingKeys.has(studentBindingKey)) {
+        await bindStudentToClass(classItem.id, studentResult.student.id);
+        studentBindings += 1;
+        processedStudentBindingKeys.add(studentBindingKey);
+      }
     } catch (error) {
       failed += 1;
 
       accounts.push({
         role: "student",
-        name: row.studentName || row.teacherName || "未知成员",
-        loginAccount: row.studentUsername || row.teacherEmail || "",
+        name: safeText(row.studentName) || safeText(row.teacherName) || "未知成员",
+        loginAccount:
+          safeText(row.studentUsername) || safeText(row.teacherEmail) || "",
         initialPassword: "",
-        className: row.className || "",
+        className: safeText(row.className),
         status: "failed",
         message: error instanceof Error ? error.message : "导入失败。",
       });

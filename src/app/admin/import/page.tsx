@@ -14,9 +14,15 @@ import type {
   PreviewImportRow,
 } from "@/lib/admin-import/types";
 
-const sampleText = `届别	班级名称	合作学校	小老师姓名	小老师企业邮箱后缀	学生名单	学生年级
-2026-2027	秋叶班	河北某小学	柴一航	24	小明、小红、小刚	四年级
-2026-2027	小溪班	河北某小学	薛喆天	259	小亮、小雨	五年级`;
+const sampleText = `届别	班级名称	合作学校	小老师姓名	小老师邮箱后缀	学生名单	学生年级
+2025-2026	秋叶班	河北某小学	柴一航	24	小明、小红、小刚	四年级
+2025-2026	小溪班	河北某小学	薛喆天	24	小亮、小雨	五年级`;
+
+function safeText(value: unknown) {
+  if (typeof value === "string") return value.trim();
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
 
 export default function AdminImportPage() {
   return (
@@ -34,32 +40,70 @@ function AdminImportContent() {
     null
   );
   const [isImporting, setIsImporting] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(true);
 
   const [reuseCandidates, setReuseCandidates] = useState<
-  BulkImportReuseCandidate[]
->([]);
+    BulkImportReuseCandidate[]
+  >([]);
 
   const importResultRef = useRef<HTMLDivElement | null>(null);
 
-  const parsedRows = useMemo(() => {
-    if (!hasParsed) return [];
-    return parseImportText(importText);
+  const parseError = useMemo(() => {
+    if (!hasParsed) return "";
+
+    try {
+      parseImportText(importText);
+      return "";
+    } catch (error) {
+      return error instanceof Error ? error.message : "解析导入文本失败。";
+    }
   }, [hasParsed, importText]);
+
+  const parsedRows = useMemo(() => {
+    if (!hasParsed || parseError) return [];
+
+    try {
+      return parseImportText(importText);
+    } catch {
+      return [];
+    }
+  }, [hasParsed, parseError, importText]);
 
   const rows = useMemo(() => {
     return buildPreviewRows(parsedRows);
   }, [parsedRows]);
 
   const errors = useMemo(() => {
-    if (!hasParsed) return [];
-    return validateImportRows(rows);
-  }, [hasParsed, rows]);
+    if (!hasParsed || parseError) return [];
+
+    try {
+      return validateImportRows(rows);
+    } catch (error) {
+      return [
+        {
+          rowNumber: 0,
+          field: "unknown",
+          message: error instanceof Error ? error.message : "格式检查失败。",
+        },
+      ] as ImportValidationError[];
+    }
+  }, [hasParsed, parseError, rows]);
 
   const classCount = useMemo(() => {
     const classKeys = new Set(
       rows
-        .filter((row) => row.cohortName && row.className && row.school)
-        .map((row) => `${row.cohortName}__${row.className}__${row.school}`)
+        .filter(
+          (row) =>
+            safeText(row.cohortName) &&
+            safeText(row.className) &&
+            safeText(row.school)
+        )
+        .map(
+          (row) =>
+            `${safeText(row.cohortName)}__${safeText(
+              row.className
+            )}__${safeText(row.school)}`
+        )
     );
 
     return classKeys.size;
@@ -67,20 +111,45 @@ function AdminImportContent() {
 
   const teacherCount = useMemo(() => {
     const teacherKeys = new Set(
-      rows.filter((row) => row.teacherEmail).map((row) => row.teacherEmail)
+      rows
+        .map((row) => safeText(row.teacherEmail).toLowerCase())
+        .filter(Boolean)
     );
 
     return teacherKeys.size;
   }, [rows]);
 
-  const studentCount = useMemo(() => {
-    return rows.filter((row) => row.studentName).length;
+  const uniqueStudentCount = useMemo(() => {
+    const studentKeys = new Set<string>();
+
+    rows.forEach((row) => {
+      row.studentNames.forEach((studentName) => {
+        const normalizedName = safeText(studentName);
+
+        if (normalizedName) {
+          studentKeys.add(normalizedName);
+        }
+      });
+    });
+
+    return studentKeys.size;
+  }, [rows]);
+
+  const studentSeatCount = useMemo(() => {
+    return rows.reduce((sum, row) => sum + row.studentNames.length, 0);
+  }, [rows]);
+
+  const cohortNames = useMemo(() => {
+    return Array.from(
+      new Set(rows.map((row) => safeText(row.cohortName)).filter(Boolean))
+    );
   }, [rows]);
 
   const canConfirmImport =
     hasParsed &&
     rows.length > 0 &&
     errors.length === 0 &&
+    !parseError &&
     importText.trim().length > 0;
 
   function handleUseSample() {
@@ -89,6 +158,7 @@ function AdminImportContent() {
     setMessage("");
     setImportResult(null);
     setReuseCandidates([]);
+    setIsPreviewOpen(true);
   }
 
   function handleClear() {
@@ -97,6 +167,7 @@ function AdminImportContent() {
     setMessage("");
     setImportResult(null);
     setReuseCandidates([]);
+    setIsPreviewOpen(true);
   }
 
   function handlePreview() {
@@ -104,6 +175,7 @@ function AdminImportContent() {
     setMessage("");
     setImportResult(null);
     setReuseCandidates([]);
+    setIsPreviewOpen(true);
   }
 
   async function submitBulkImport(allowReuseArchived: boolean) {
@@ -129,7 +201,7 @@ function AdminImportContent() {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          rows: parsedRows,
+          rows,
           allowReuseArchived,
         }),
       });
@@ -146,7 +218,7 @@ function AdminImportContent() {
       }
 
       if (!response.ok) {
-        throw new Error(data.message || "导入请求失败。");
+        throw new Error(data.message || data.error || "导入请求失败。");
       }
 
       setReuseCandidates([]);
@@ -179,7 +251,7 @@ function AdminImportContent() {
     }
 
     const confirmed = window.confirm(
-      `确认正式导入吗？\n\n当前预计导入：\n班级 ${classCount} 个\n小老师 ${teacherCount} 位\n学生 ${studentCount} 名\n\n系统会创建新账号、生成初始密码，并绑定班级关系。如果发现已封存账号，系统会先要求你确认是否复用。`
+      `确认正式导入吗？\n\n当前预计导入：\n班级 ${classCount} 个\n小老师 ${teacherCount} 位\n不重复学生 ${uniqueStudentCount} 名\n班级学生席位 ${studentSeatCount} 个\n\n创建班级属于正常开班流程，不需要多管理员确认。\n系统会直接创建新账号、生成初始密码，并绑定班级关系。如果发现已封存账号，系统会先要求你确认是否复用。`
     );
 
     if (!confirmed) return;
@@ -207,12 +279,16 @@ function AdminImportContent() {
       <section className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
+            <p className="text-sm font-semibold text-[#2f5d50]">
+              Admin / 批量导入
+            </p>
+
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               批量导入账号与班级
             </h1>
 
             <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里用于一次性创建届别、班级、老师账号、学生账号，并自动绑定老师和学生到对应班级。管理员只需要粘贴基础名单，系统会根据姓名自动生成登录账号。
+              这里用于正常开班导入。管理员粘贴分班文本后，先预览真实班级、小老师和学生名单；确认无误后直接创建届别、班级、老师账号、学生账号和绑定关系。
             </p>
           </div>
 
@@ -221,12 +297,12 @@ function AdminImportContent() {
               href="/admin/classes"
               className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
             >
-              返回班级管理
+              返回班级查询
             </Link>
 
             <Link
               href="/admin"
-              className="w-fit rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
+              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
             >
               返回管理员主页
             </Link>
@@ -250,7 +326,7 @@ function AdminImportContent() {
                 从 Excel 或 Google Sheets 复制表格后粘贴到这里。推荐列顺序：
                 <span className="font-semibold text-emerald-800">
                   {" "}
-                  届别、班级名称、合作学校、小老师姓名、小老师企业邮箱后缀、学生名单、学生年级
+                  届别、班级名称、合作学校、小老师姓名、小老师邮箱后缀、学生名单、学生年级
                 </span>
                 。学生名单可以用顿号、逗号、分号或斜杠分隔。系统会自动根据老师和学生姓名生成邮箱前缀、学生用户名和登录邮箱。
               </p>
@@ -289,10 +365,10 @@ function AdminImportContent() {
 
               <div className="mt-2 space-y-2">
                 <p>
-                  小老师姓名 + 小老师届别 → 拼音 + 企业邮箱后缀 → 学校邮箱
+                  小老师姓名 + 邮箱后缀 → 拼音 + 后缀 → 学校邮箱。
                   <span className="font-semibold text-emerald-800">
                     {" "}
-                    张三 + 2024 → zhangsan24@shphschool.com
+                    柴一航 + 24 → chaiyihang24@shphschool.com
                   </span>
                 </p>
 
@@ -305,7 +381,7 @@ function AdminImportContent() {
                 </p>
 
                 <p>
-                  如果出现重名导致账号重复，系统会在预览阶段提示错误，正式导入前必须处理。
+                  班级创建属于正常开班流程。预览确认无误后会直接创建，不进入维护中心审批。
                 </p>
               </div>
             </div>
@@ -329,7 +405,8 @@ function AdminImportContent() {
             <button
               type="button"
               onClick={handlePreview}
-              className="rounded-full bg-[#2f5d50] px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
+              disabled={isImporting}
+              className="rounded-full bg-[#2f5d50] px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               预览
             </button>
@@ -340,7 +417,7 @@ function AdminImportContent() {
               disabled={!canConfirmImport || isImporting}
               className="rounded-full border border-emerald-700 px-6 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isImporting ? "正在导入..." : "确认导入"}
+              {isImporting ? "正在导入..." : "确认导入并直接创建"}
             </button>
           </div>
         </section>
@@ -349,9 +426,14 @@ function AdminImportContent() {
           <ImportPreviewSection
             rows={rows}
             errors={errors}
+            parseError={parseError}
             classCount={classCount}
             teacherCount={teacherCount}
-            studentCount={studentCount}
+            uniqueStudentCount={uniqueStudentCount}
+            studentSeatCount={studentSeatCount}
+            cohortNames={cohortNames}
+            isPreviewOpen={isPreviewOpen}
+            onTogglePreview={() => setIsPreviewOpen((prev) => !prev)}
           />
         )}
 
@@ -376,17 +458,27 @@ function AdminImportContent() {
 type ImportPreviewSectionProps = {
   rows: PreviewImportRow[];
   errors: ImportValidationError[];
+  parseError: string;
   classCount: number;
   teacherCount: number;
-  studentCount: number;
+  uniqueStudentCount: number;
+  studentSeatCount: number;
+  cohortNames: string[];
+  isPreviewOpen: boolean;
+  onTogglePreview: () => void;
 };
 
 function ImportPreviewSection({
   rows,
   errors,
+  parseError,
   classCount,
   teacherCount,
-  studentCount,
+  uniqueStudentCount,
+  studentSeatCount,
+  cohortNames,
+  isPreviewOpen,
+  onTogglePreview,
 }: ImportPreviewSectionProps) {
   return (
     <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
@@ -395,16 +487,34 @@ function ImportPreviewSection({
           <h2 className="text-xl font-bold text-emerald-950">导入预览</h2>
 
           <p className="mt-2 text-sm leading-7 text-stone-600">
-            这里展示系统解析后的名单，以及自动生成的登录账号。正式导入前，请先确认账号是否正确，尤其注意重名学生和重名老师。
+            这里展示系统解析后的真实班级、小老师、学生名单和自动生成账号。正式导入前，请逐行确认，尤其注意重名学生、重名老师和班级名。
           </p>
         </div>
 
-        {errors.length === 0 && rows.length > 0 && (
-          <span className="w-fit rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
-            格式检查通过
-          </span>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {errors.length === 0 && !parseError && rows.length > 0 && (
+            <span className="w-fit rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
+              格式检查通过
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={onTogglePreview}
+            className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+          >
+            {isPreviewOpen ? "收起预览" : "展开预览"}
+          </button>
+        </div>
       </div>
+
+      {parseError && (
+        <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
+          <p className="text-sm font-semibold text-red-700">解析失败</p>
+
+          <p className="mt-2 text-sm text-red-700">{parseError}</p>
+        </div>
+      )}
 
       {errors.length > 0 && (
         <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
@@ -428,7 +538,19 @@ function ImportPreviewSection({
         </p>
       ) : (
         <>
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="mt-5 grid gap-3 sm:grid-cols-5">
+            <div className="rounded-2xl bg-[#fffdf4] p-4">
+              <p className="text-sm text-stone-500">届别</p>
+
+              <p className="mt-1 text-3xl font-bold text-emerald-950">
+                {cohortNames.length}
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-stone-500">
+                {cohortNames.join("、")}
+              </p>
+            </div>
+
             <div className="rounded-2xl bg-[#fffdf4] p-4">
               <p className="text-sm text-stone-500">预计班级数量</p>
               <p className="mt-1 text-3xl font-bold text-emerald-950">
@@ -444,84 +566,114 @@ function ImportPreviewSection({
             </div>
 
             <div className="rounded-2xl bg-[#fffdf4] p-4">
-              <p className="text-sm text-stone-500">预计学生数量</p>
+              <p className="text-sm text-stone-500">不重复学生数量</p>
               <p className="mt-1 text-3xl font-bold text-emerald-950">
-                {studentCount}
+                {uniqueStudentCount}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-[#fffdf4] p-4">
+              <p className="text-sm text-stone-500">班级学生席位</p>
+              <p className="mt-1 text-3xl font-bold text-emerald-950">
+                {studentSeatCount}
               </p>
             </div>
           </div>
 
-          <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100">
-            <table className="w-full min-w-[1300px] border-collapse bg-white text-left text-sm">
-              <thead className="bg-[#fffdf4] text-stone-600">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">行号</th>
-                  <th className="px-4 py-3 font-semibold">届别</th>
-                  <th className="px-4 py-3 font-semibold">班级</th>
-                  <th className="px-4 py-3 font-semibold">学校</th>
-                  <th className="px-4 py-3 font-semibold">小老师</th>
-                  <th className="px-4 py-3 font-semibold">小老师企业邮箱后缀</th>
-                  <th className="px-4 py-3 font-semibold">老师邮箱</th>
-                  <th className="px-4 py-3 font-semibold">学生</th>
-                  <th className="px-4 py-3 font-semibold">年级</th>
-                  <th className="px-4 py-3 font-semibold">学生用户名</th>
-                  <th className="px-4 py-3 font-semibold">学生登录邮箱</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={`${row.rowNumber}-${row.studentName}-${row.studentUsername}`}
-                    className="border-t border-emerald-50"
-                  >
-                    <td className="px-4 py-3 text-stone-500">
-                      {row.rowNumber}
-                    </td>
-
-                    <td className="px-4 py-3 text-stone-700">
-                      {row.cohortName || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 font-semibold text-emerald-950">
-                      {row.className || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 text-stone-700">
-                      {row.school || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 text-stone-700">
-                      {row.teacherName || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 text-stone-700">
-                      {row.teacherEnteringYear || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 font-mono text-xs text-stone-700">
-                      {row.teacherEmail || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 text-stone-700">
-                      {row.studentName || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 text-stone-700">
-                      {row.studentGrade || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 font-mono text-xs text-stone-700">
-                      {row.studentUsername || "-"}
-                    </td>
-
-                    <td className="px-4 py-3 font-mono text-xs text-stone-700">
-                      {row.studentAuthEmail || "-"}
-                    </td>
+          {!isPreviewOpen ? (
+            <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
+              预览已收起。当前将导入 {classCount} 个班级，{teacherCount}{" "}
+              位小老师，{uniqueStudentCount} 位不重复学生。
+            </p>
+          ) : (
+            <div className="mt-5 max-h-[560px] overflow-auto rounded-2xl border border-emerald-100">
+              <table className="w-full min-w-[1300px] border-collapse bg-white text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-[#fffdf4] text-stone-600">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">行号</th>
+                    <th className="px-4 py-3 font-semibold">届别</th>
+                    <th className="px-4 py-3 font-semibold">班级</th>
+                    <th className="px-4 py-3 font-semibold">学校</th>
+                    <th className="px-4 py-3 font-semibold">小老师</th>
+                    <th className="px-4 py-3 font-semibold">邮箱后缀</th>
+                    <th className="px-4 py-3 font-semibold">老师邮箱</th>
+                    <th className="px-4 py-3 font-semibold">学生名单</th>
+                    <th className="px-4 py-3 font-semibold">人数</th>
+                    <th className="px-4 py-3 font-semibold">年级</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+
+                <tbody>
+                  {rows.map((row) => (
+                    <tr
+                      key={`${row.rowNumber}-${row.className}-${row.teacherName}`}
+                      className="border-t border-emerald-50"
+                    >
+                      <td className="px-4 py-3 align-top text-stone-500">
+                        {row.rowNumber}
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-stone-700">
+                        {row.cohortName || "-"}
+                      </td>
+
+                      <td className="px-4 py-3 align-top font-semibold text-emerald-950">
+                        {row.className || "-"}
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-stone-700">
+                        {row.school || "-"}
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-stone-700">
+                        {row.teacherName || "-"}
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-stone-700">
+                        {row.teacherEnteringYear || "-"}
+                      </td>
+
+                      <td className="px-4 py-3 align-top font-mono text-xs text-stone-700">
+                        {row.teacherEmail || "-"}
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-stone-700">
+                        <div className="flex flex-wrap gap-2">
+                          {row.studentNames.length > 0 ? (
+                            row.studentNames.map((studentName, index) => (
+                              <span
+                                key={`${row.rowNumber}-${studentName}-${index}`}
+                                className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
+                              >
+                                {studentName}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-red-700">暂无学生</span>
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3 align-top font-semibold text-stone-700">
+                        {row.studentNames.length}
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-stone-700">
+                        {row.studentGrade || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm leading-7 text-amber-800">
+            <p className="font-bold">导入确认规则</p>
+
+            <p className="mt-1">
+              点击确认导入后，系统会直接创建届别、班级、老师账号、学生账号和班级绑定关系。创建属于正常开班流程，不需要多管理员确认。后续修改、移除、删除/封存、整届封存、密码重置才进入维护中心审批。
+            </p>
           </div>
         </>
       )}

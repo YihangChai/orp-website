@@ -1,171 +1,199 @@
-import type { ImportValidationError, PreviewImportRow } from "./types";
+import type {
+  ExecutionImportRow,
+  ImportValidationError,
+  ParsedImportRow,
+  PreviewImportRow,
+} from "./types";
 
-function isValidAccountPart(value: string) {
-  return /^[a-zA-Z0-9._-]+$/.test(value);
+type ImportRowForValidation =
+  | ParsedImportRow
+  | PreviewImportRow
+  | ExecutionImportRow;
+
+function safeText(value: unknown) {
+  if (typeof value === "string") return value.trim();
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
 }
 
-// function isValidTeacherEnteringYear(value: string) {
-//   return /^\d{4}$/.test(value.trim());
-// }
-
-function isValidTeacherEmailSuffix(value: string) {
-  return /^\d{2,3}$/.test(value.trim());
+function getRowNumber(row: ImportRowForValidation) {
+  return Number(row.rowNumber || row.lineNumber || 0);
 }
 
-export function validateImportRows(rows: PreviewImportRow[]) {
-  const errors: ImportValidationError[] = [];
+function getStudentNames(row: ImportRowForValidation) {
+  const possibleExecutionRow = row as Partial<ExecutionImportRow>;
 
-  if (rows.length === 0) {
-    return [
-      {
-        rowNumber: 0,
-        field: "table",
-        message: "请先粘贴要导入的表格内容。",
-      },
-    ];
+  if (Array.isArray(row.studentNames)) {
+    return row.studentNames.map(safeText).filter(Boolean);
   }
 
-  const studentUsernameMap = new Map<string, number>();
-  const teacherEmailNameMap = new Map<string, string>();
+  const singleStudentName = safeText(possibleExecutionRow.studentName);
+
+  if (singleStudentName) {
+    return [singleStudentName];
+  }
+
+  return [];
+}
+
+function isValidTeacherEmailSuffix(value: unknown) {
+  const suffix = safeText(value);
+  return /^\d{2,3}$/.test(suffix);
+}
+
+function normalizeClassKey(params: { cohortName: string; className: string }) {
+  return [
+    params.cohortName,
+    params.className.replace(/\s+/g, "").toLowerCase(),
+  ].join("__");
+}
+
+function normalizeStudentName(name: unknown) {
+  return safeText(name).replace(/\s+/g, "");
+}
+
+function pushError(
+  errors: ImportValidationError[],
+  params: {
+    rowNumber: number;
+    field: string;
+    message: string;
+  }
+) {
+  errors.push({
+    rowNumber: params.rowNumber,
+    field: params.field,
+    message: params.message,
+  });
+}
+
+export function validateImportRows(
+  rows: ImportRowForValidation[]
+): ImportValidationError[] {
+  const errors: ImportValidationError[] = [];
+  const classKeys = new Map<string, number>();
+  const teacherEmailKeys = new Map<string, number>();
 
   rows.forEach((row) => {
-    if (!row.cohortName) {
-      errors.push({
-        rowNumber: row.rowNumber,
+    const rowNumber = getRowNumber(row);
+
+    const cohortName = safeText(row.cohortName);
+    const className = safeText(row.className);
+    const school = safeText(row.school);
+    const teacherName = safeText(row.teacherName);
+    const teacherEnteringYear = safeText(row.teacherEnteringYear);
+    const studentNames = getStudentNames(row);
+
+    if (!cohortName) {
+      pushError(errors, {
+        rowNumber,
         field: "cohortName",
         message: "缺少届别。",
       });
     }
 
-    if (!row.className) {
-      errors.push({
-        rowNumber: row.rowNumber,
+    if (!className) {
+      pushError(errors, {
+        rowNumber,
         field: "className",
         message: "缺少班级名称。",
       });
     }
 
-    if (!row.school) {
-      errors.push({
-        rowNumber: row.rowNumber,
+    if (!school) {
+      pushError(errors, {
+        rowNumber,
         field: "school",
         message: "缺少合作学校。",
       });
     }
 
-    if (!row.teacherName) {
-      errors.push({
-        rowNumber: row.rowNumber,
+    if (!teacherName) {
+      pushError(errors, {
+        rowNumber,
         field: "teacherName",
         message: "缺少小老师姓名。",
       });
     }
 
-    if (!row.teacherEnteringYear) {
-      errors.push({
-        rowNumber: row.rowNumber,
+    if (!teacherEnteringYear) {
+      pushError(errors, {
+        rowNumber,
         field: "teacherEnteringYear",
-        message: "缺少小老师邮箱后缀，例如 24 或 259。",
+        message: "缺少小老师邮箱后缀。",
       });
-    }
-
-    if (
-      row.teacherEnteringYear &&
-      !isValidTeacherEmailSuffix(row.teacherEnteringYear)
-    ) {
-      errors.push({
-        rowNumber: row.rowNumber,
+    } else if (!isValidTeacherEmailSuffix(teacherEnteringYear)) {
+      pushError(errors, {
+        rowNumber,
         field: "teacherEnteringYear",
-        message: "请检查小老师邮箱后缀格式",
+        message:
+          "小老师邮箱后缀格式不合法，请填写 2 到 3 位数字，例如 24 或 259，不要填写完整年份 2024。",
       });
     }
 
-    if (!row.studentName) {
-      errors.push({
-        rowNumber: row.rowNumber,
-        field: "studentName",
-        message: "缺少学生姓名。",
+    if (studentNames.length === 0) {
+      pushError(errors, {
+        rowNumber,
+        field: "studentNames",
+        message:
+          "缺少学生姓名。学生名单可以用顿号、中文逗号、英文逗号、分号或斜杠分隔。",
       });
     }
 
-    if (!row.studentGrade) {
-      errors.push({
-        rowNumber: row.rowNumber,
-        field: "studentGrade",
-        message: "缺少学生年级。",
+    const seenStudentsInThisClass = new Set<string>();
+
+    studentNames.forEach((studentName) => {
+      const normalizedStudentName = normalizeStudentName(studentName);
+
+      if (!normalizedStudentName) {
+        return;
+      }
+
+      if (seenStudentsInThisClass.has(normalizedStudentName)) {
+        pushError(errors, {
+          rowNumber,
+          field: "studentNames",
+          message: `同一个班级内学生「${studentName}」重复出现。`,
+        });
+      }
+
+      seenStudentsInThisClass.add(normalizedStudentName);
+    });
+
+    if (cohortName && className) {
+      const classKey = normalizeClassKey({
+        cohortName,
+        className,
       });
-    }
 
-    if (row.teacherName && !row.teacherEmailPrefix) {
-      errors.push({
-        rowNumber: row.rowNumber,
-        field: "teacherEmailPrefix",
-        message: "无法根据小老师姓名生成邮箱前缀，请检查姓名。",
-      });
-    }
-
-    if (
-      row.teacherName &&
-      row.teacherEnteringYear &&
-      isValidTeacherEmailSuffix(row.teacherEnteringYear) &&
-      !row.teacherEmail
-    ) {
-      errors.push({
-        rowNumber: row.rowNumber,
-        field: "teacherEmail",
-        message: "无法生成小老师邮箱，请检查小老师姓名和届别。",
-      });
-    }
-
-    if (row.studentName && !row.studentUsername) {
-      errors.push({
-        rowNumber: row.rowNumber,
-        field: "studentUsername",
-        message: "无法根据学生姓名生成用户名，请检查姓名。",
-      });
-    }
-
-    if (row.teacherEmailPrefix && !isValidAccountPart(row.teacherEmailPrefix)) {
-      errors.push({
-        rowNumber: row.rowNumber,
-        field: "teacherEmailPrefix",
-        message: "自动生成的小老师邮箱前缀格式不合法。",
-      });
-    }
-
-    if (row.studentUsername && !isValidAccountPart(row.studentUsername)) {
-      errors.push({
-        rowNumber: row.rowNumber,
-        field: "studentUsername",
-        message: "自动生成的学生用户名格式不合法。",
-      });
-    }
-
-    if (row.studentUsername) {
-      const existingRowNumber = studentUsernameMap.get(row.studentUsername);
-
-      if (existingRowNumber !== undefined) {
-        errors.push({
-          rowNumber: row.rowNumber,
-          field: "studentUsername",
-          message: `自动生成的学生用户名与第 ${existingRowNumber} 行重复：${row.studentUsername}。请检查是否有重名学生。`,
+      if (classKeys.has(classKey)) {
+        pushError(errors, {
+          rowNumber,
+          field: "className",
+          message: `同一届别中班级「${className}」重复。第一次出现于第 ${classKeys.get(
+            classKey
+          )} 行。`,
         });
       } else {
-        studentUsernameMap.set(row.studentUsername, row.rowNumber);
+        classKeys.set(classKey, rowNumber);
       }
     }
 
-    if (row.teacherEmail) {
-      const existingTeacherName = teacherEmailNameMap.get(row.teacherEmail);
+    const possiblePreviewRow = row as Partial<PreviewImportRow>;
 
-      if (existingTeacherName && existingTeacherName !== row.teacherName) {
-        errors.push({
-          rowNumber: row.rowNumber,
+    const teacherEmail = safeText(possiblePreviewRow.teacherEmail).toLowerCase();
+
+    if (teacherEmail) {
+      if (teacherEmailKeys.has(teacherEmail)) {
+        pushError(errors, {
+          rowNumber,
           field: "teacherEmail",
-          message: `自动生成的老师邮箱对应了不同姓名：${existingTeacherName} / ${row.teacherName}。请检查是否有老师重名或拼音冲突。`,
+          message: `小老师邮箱「${teacherEmail}」重复。第一次出现于第 ${teacherEmailKeys.get(
+            teacherEmail
+          )} 行。`,
         });
       } else {
-        teacherEmailNameMap.set(row.teacherEmail, row.teacherName);
+        teacherEmailKeys.set(teacherEmail, rowNumber);
       }
     }
   });

@@ -1,84 +1,85 @@
 import type { ParsedImportRow } from "./types";
 
-function cleanCell(value: string | undefined) {
-  return (value || "").trim();
-}
+export function splitStudentNames(value: unknown) {
+  const text =
+    typeof value === "string"
+      ? value
+      : value === null || value === undefined
+      ? ""
+      : String(value);
 
-function splitStudentNames(text: string) {
   return text
-    .split(/、|,|，|;|；|\//)
+    .split(/[,\，、;；/／]/)
     .map((name) => name.trim())
     .filter(Boolean);
 }
 
-export function parseImportText(text: string): ParsedImportRow[] {
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+function safeText(value: unknown) {
+  if (typeof value === "string") return value.trim();
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
 
-  if (lines.length === 0) {
-    return [];
+function isHeaderLine(line: string) {
+  return (
+    line.includes("届别") &&
+    line.includes("班级") &&
+    line.includes("小老师") &&
+    line.includes("学生")
+  );
+}
+
+function splitImportLine(line: string) {
+  const trimmedLine = safeText(line);
+
+  if (trimmedLine.includes("\t")) {
+    return trimmedLine.split(/\t+/).map((part) => safeText(part));
   }
 
-  const firstLine = lines[0];
+  return trimmedLine.split(/\s+/).map((part) => safeText(part));
+}
 
-  const hasHeader =
-    firstLine.includes("届别") ||
-    firstLine.includes("班级") ||
-    firstLine.includes("老师") ||
-    firstLine.includes("学生");
+function cell(parts: string[], index: number) {
+  return safeText(parts[index]);
+}
 
-  const dataLines = hasHeader ? lines.slice(1) : lines;
+export function parseImportText(text: string): ParsedImportRow[] {
+  return safeText(text)
+    .split(/\r?\n/)
+    .map((line, index) => {
+      const trimmedLine = safeText(line);
 
-  const rows: ParsedImportRow[] = [];
+      return {
+        rawLine: line,
+        rowNumber: index + 1,
+        lineNumber: index + 1,
+        trimmedLine,
+      };
+    })
+    .filter((item) => item.trimmedLine.length > 0)
+    .filter((item) => !isHeaderLine(item.trimmedLine))
+    .map((item) => {
+      const parts = splitImportLine(item.trimmedLine);
 
-  dataLines.forEach((line, index) => {
-    const rowNumber = hasHeader ? index + 2 : index + 1;
+      const cohortName = cell(parts, 0);
+      const className = cell(parts, 1);
+      const school = cell(parts, 2);
+      const teacherName = cell(parts, 3);
+      const teacherEnteringYear = cell(parts, 4);
+      const studentNamesText = cell(parts, 5);
+      const studentGrade = cell(parts, 6);
 
-    const columns = line.split(/\t|,/).map((column) => column.trim());
-
-    const [
-      cohortName,
-      className,
-      school,
-      teacherName,
-      teacherEnteringYear,
-      studentNamesText,
-      studentGrade,
-    ] = columns;
-
-    const cleanedStudentNamesText = cleanCell(studentNamesText);
-    const studentNames = splitStudentNames(cleanedStudentNamesText);
-
-    if (studentNames.length === 0) {
-      rows.push({
-        rowNumber,
-        cohortName: cleanCell(cohortName),
-        className: cleanCell(className),
-        school: cleanCell(school),
-        teacherName: cleanCell(teacherName),
-        teacherEnteringYear: cleanCell(teacherEnteringYear),
-        studentName: "",
-        studentGrade: cleanCell(studentGrade),
-      });
-
-      return;
-    }
-
-    studentNames.forEach((studentName) => {
-      rows.push({
-        rowNumber,
-        cohortName: cleanCell(cohortName),
-        className: cleanCell(className),
-        school: cleanCell(school),
-        teacherName: cleanCell(teacherName),
-        teacherEnteringYear: cleanCell(teacherEnteringYear),
-        studentName,
-        studentGrade: cleanCell(studentGrade),
-      });
+      return {
+        rowNumber: item.rowNumber,
+        lineNumber: item.lineNumber,
+        cohortName,
+        className,
+        school,
+        teacherName,
+        teacherEnteringYear,
+        studentNames: splitStudentNames(studentNamesText),
+        studentGrade,
+        rawLine: item.rawLine,
+      };
     });
-  });
-
-  return rows;
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import StudentGuard, { useCurrentStudent } from "@/components/StudentGuard";
 import type { CurrentStudent } from "@/lib/auth";
@@ -12,8 +13,24 @@ type StudentRow = {
   status: string;
 };
 
+type CohortRow = {
+  id: string;
+  name: string;
+  status: string;
+};
+
+type ClassRow = {
+  id: string;
+  name: string;
+  school: string | null;
+  status: string;
+  subject: string | null;
+  cohorts: CohortRow | null;
+};
+
 type ClassRelation = {
   class_id: string;
+  classes: ClassRow | null;
 };
 
 type LessonRecord = {
@@ -47,11 +64,24 @@ type StudentLessonComment = {
 
 type StudentLessonsPageData = {
   student: StudentRow;
-  classId: string;
+  classRelations: ClassRelation[];
+  selectedClassRelation: ClassRelation;
+  selectedClassId: string;
   records: LessonRecord[];
   attendanceRecords: AttendanceRecord[];
   comments: StudentLessonComment[];
 };
+
+function getSubjectLabel(subject: string | null | undefined) {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "暂未设置";
+}
+
+function buildStudentClassLink(path: string, classId: string | null) {
+  if (!classId) return path;
+  return `${path}?classId=${encodeURIComponent(classId)}`;
+}
 
 export default function StudentLessonsPage() {
   return (
@@ -63,7 +93,10 @@ export default function StudentLessonsPage() {
 
 function StudentLessonsContent() {
   const currentStudent = useCurrentStudent();
+  const searchParams = useSearchParams();
+  const classIdFromUrl = searchParams.get("classId") || "";
 
+  const [selectedClassId, setSelectedClassId] = useState(classIdFromUrl);
   const [pageData, setPageData] = useState<StudentLessonsPageData | null>(null);
 
   const [expandedLessonId, setExpandedLessonId] = useState<string | null>(null);
@@ -75,7 +108,8 @@ function StudentLessonsContent() {
   const [message, setMessage] = useState("");
 
   async function loadStudentLessonsPageData(
-    activeStudent: CurrentStudent
+    activeStudent: CurrentStudent,
+    requestedClassId: string
   ): Promise<StudentLessonsPageData> {
     const { data: studentFromSupabase, error: studentError } = await supabase
       .from("students")
@@ -102,21 +136,54 @@ function StudentLessonsContent() {
 
     const { data: relationFromSupabase, error: relationError } = await supabase
       .from("class_students")
-      .select("class_id")
+      .select(
+        `
+        class_id,
+        classes (
+          id,
+          name,
+          school,
+          status,
+          subject,
+          cohorts (
+            id,
+            name,
+            status
+          )
+        )
+      `
+      )
       .eq("student_id", activeStudent.id);
 
     if (relationError) {
       throw new Error(`读取班级关系失败：${relationError.message}`);
     }
 
-    const relations = (relationFromSupabase || []) as ClassRelation[];
-    const relation = relations[0];
+    const allRelations = (
+      (relationFromSupabase || []) as unknown as ClassRelation[]
+    ).filter((relation) => Boolean(relation.classes));
 
-    if (!relation) {
-      throw new Error("没有找到你的班级信息，请联系 ORP 管理员。");
+    const activeRelations = allRelations.filter((relation) => {
+      const classItem = relation.classes;
+
+      if (!classItem) return false;
+      if (classItem.status === "archived") return false;
+      if (classItem.status === "withdrawn") return false;
+      if (classItem.cohorts?.status === "archived") return false;
+
+      return true;
+    });
+
+    if (activeRelations.length === 0) {
+      throw new Error("没有找到你的可用班级信息，请联系 ORP 管理员。");
     }
 
-    const activeClassId = relation.class_id;
+    const requestedRelation = requestedClassId
+      ? activeRelations.find((relation) => relation.class_id === requestedClassId)
+      : null;
+
+    const selectedRelation = requestedRelation || activeRelations[0];
+    const activeClassId = selectedRelation.class_id;
 
     const { data: recordsFromSupabase, error: recordsError } = await supabase
       .from("lesson_records")
@@ -137,7 +204,9 @@ function StudentLessonsContent() {
     if (lessonRecordIds.length === 0) {
       return {
         student: studentData,
-        classId: activeClassId,
+        classRelations: activeRelations,
+        selectedClassRelation: selectedRelation,
+        selectedClassId: activeClassId,
         records: [],
         attendanceRecords: [],
         comments: [],
@@ -171,12 +240,20 @@ function StudentLessonsContent() {
 
     return {
       student: studentData,
-      classId: activeClassId,
+      classRelations: activeRelations,
+      selectedClassRelation: selectedRelation,
+      selectedClassId: activeClassId,
       records: lessonRecords,
       attendanceRecords: (attendanceResult.data || []) as AttendanceRecord[],
       comments: (commentsResult.data || []) as StudentLessonComment[],
     };
   }
+
+  useEffect(() => {
+    if (classIdFromUrl && classIdFromUrl !== selectedClassId) {
+      setSelectedClassId(classIdFromUrl);
+    }
+  }, [classIdFromUrl, selectedClassId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -186,11 +263,20 @@ function StudentLessonsContent() {
       setMessage("");
 
       try {
-        const loadedPageData = await loadStudentLessonsPageData(currentStudent);
+        const requestedClassId = selectedClassId || classIdFromUrl;
+
+        const loadedPageData = await loadStudentLessonsPageData(
+          currentStudent,
+          requestedClassId
+        );
 
         if (!isMounted) return;
 
         setPageData(loadedPageData);
+
+        if (selectedClassId !== loadedPageData.selectedClassId) {
+          setSelectedClassId(loadedPageData.selectedClassId);
+        }
       } catch (error) {
         if (!isMounted) return;
 
@@ -211,7 +297,7 @@ function StudentLessonsContent() {
     return () => {
       isMounted = false;
     };
-  }, [currentStudent]);
+  }, [currentStudent, selectedClassId, classIdFromUrl]);
 
   const attendanceByLessonId = useMemo(() => {
     const map = new Map<string, AttendanceRecord>();
@@ -233,6 +319,14 @@ function StudentLessonsContent() {
 
     return map;
   }, [pageData?.comments]);
+
+  function handleSelectClass(nextClassId: string) {
+    setSelectedClassId(nextClassId);
+    setExpandedLessonId(null);
+    setCommentLessonId(null);
+    setCommentText("");
+    setMessage("");
+  }
 
   async function submitComment(lessonId: string) {
     if (!pageData) {
@@ -307,6 +401,12 @@ function StudentLessonsContent() {
 
   const studentName = pageData?.student.name || currentStudent.name;
   const records = pageData?.records || [];
+  const selectedClass = pageData?.selectedClassRelation.classes || null;
+  const currentClassId = pageData?.selectedClassId || selectedClassId || "";
+  const currentClassName = selectedClass?.name || "当前班级";
+  const currentSubjectName = getSubjectLabel(selectedClass?.subject);
+  const hasMultipleClasses = (pageData?.classRelations.length || 0) > 1;
+  const studentHomeLink = buildStudentClassLink("/student", currentClassId);
 
   return (
     <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
@@ -322,13 +422,17 @@ function StudentLessonsContent() {
             </h1>
 
             <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里可以查看每一节课的内容、作业、下次计划、材料链接，也可以给小老师留言。
+              这里可以查看当前班级每一节课的内容、作业、下次计划、材料链接，也可以给小老师留言。
+            </p>
+
+            <p className="mt-2 text-sm font-semibold text-emerald-800">
+              当前班级：{currentClassName} · {currentSubjectName}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/student"
+              href={studentHomeLink}
               className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
             >
               返回学习空间
@@ -342,10 +446,42 @@ function StudentLessonsContent() {
           </div>
         )}
 
+        {pageData && hasMultipleClasses && (
+          <section className="mb-6 rounded-[1.5rem] border border-emerald-100 bg-white p-5 shadow-sm">
+            <p className="text-sm font-semibold text-emerald-700">
+              选择当前班级
+            </p>
+
+            <p className="mt-2 text-sm leading-7 text-stone-600">
+              你同时参加了多个 ORP 班级。切换班级后，下面的课程记录、出勤和留言会跟随切换。
+            </p>
+
+            <select
+              value={currentClassId}
+              onChange={(event) => handleSelectClass(event.target.value)}
+              className="mt-4 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm font-semibold text-emerald-950 outline-none transition focus:border-emerald-500 focus:bg-white"
+            >
+              {pageData.classRelations.map((relation) => {
+                const classItem = relation.classes;
+                const className = classItem?.name || "未命名班级";
+                const subjectName = getSubjectLabel(classItem?.subject);
+                const cohortName = classItem?.cohorts?.name || "";
+
+                return (
+                  <option key={relation.class_id} value={relation.class_id}>
+                    {className} · {subjectName}
+                    {cohortName ? ` · ${cohortName}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </section>
+        )}
+
         <section className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
           {records.length === 0 ? (
             <p className="rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-              目前还没有课程记录。
+              当前班级目前还没有课程记录。
             </p>
           ) : (
             <div className="space-y-4">

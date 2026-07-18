@@ -1,20 +1,168 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { pinyin } from "pinyin-pro";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { buildPreviewRows } from "@/lib/admin-import/buildPreviewRows";
 import { validateImportRows } from "@/lib/admin-import/validateImportRows";
 import { executeBulkImport } from "@/lib/admin-import/executeBulkImport";
 import type {
   BulkImportReuseCandidate,
-  ParsedImportRow,
+  ExecutionImportRow,
+  ImportValidationError,
   PreviewImportRow,
 } from "@/lib/admin-import/types";
+
+const STUDENT_AUTH_DOMAIN = "orp.local";
+
+function safeText(value: unknown) {
+  if (typeof value === "string") return value.trim();
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
 
 function getBearerToken(request: Request) {
   const authorization = request.headers.get("authorization");
   if (!authorization) return null;
   if (!authorization.startsWith("Bearer ")) return null;
   return authorization.replace("Bearer ", "");
+}
+
+function nameToAccountPart(name: unknown) {
+  const text = safeText(name);
+
+  if (!text) return "";
+
+  const manualMap: Record<string, string> = {
+    柴一航: "chaiyihang",
+  };
+
+  if (manualMap[text]) {
+    return manualMap[text];
+  }
+
+  return pinyin(text, {
+    toneType: "none",
+    type: "array",
+  })
+    .join("")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9._-]/g, "");
+}
+
+function buildStudentUsername(studentName: string) {
+  return nameToAccountPart(studentName);
+}
+
+function buildStudentAuthEmail(studentUsername: string) {
+  if (!studentUsername) return "";
+  return `${studentUsername}@${STUDENT_AUTH_DOMAIN}`;
+}
+
+function expandPreviewRowsToExecutionRows(
+  rows: PreviewImportRow[]
+): ExecutionImportRow[] {
+  const executionRows: ExecutionImportRow[] = [];
+
+  rows.forEach((row) => {
+    const rowNumber = Number(row.rowNumber || row.lineNumber || 0);
+
+    const cohortName = safeText(row.cohortName);
+    const className = safeText(row.className);
+    const school = safeText(row.school);
+
+    const teacherName = safeText(row.teacherName);
+    const teacherEnteringYear = safeText(row.teacherEnteringYear);
+    const teacherEmailPrefix = safeText(row.teacherEmailPrefix);
+    const teacherEmail = safeText(row.teacherEmail).toLowerCase();
+
+    const studentGrade = safeText(row.studentGrade);
+    const rawLine = safeText(row.rawLine);
+
+    const studentNames = Array.isArray(row.studentNames)
+      ? row.studentNames.map(safeText).filter(Boolean)
+      : [];
+
+    studentNames.forEach((studentName) => {
+      const studentUsername = buildStudentUsername(studentName);
+      const studentAuthEmail = buildStudentAuthEmail(studentUsername);
+
+      executionRows.push({
+        rowNumber,
+        lineNumber: rowNumber,
+
+        cohortName,
+        className,
+        school,
+
+        teacherName,
+        teacherEnteringYear,
+        teacherEmailPrefix,
+        teacherEmail,
+
+        studentName,
+        studentNames: [studentName],
+        studentGrade,
+        studentUsername,
+        studentAuthEmail,
+
+        rawLine,
+      });
+    });
+  });
+
+  return executionRows;
+}
+
+function validateExecutionRowsLightly(
+  rows: ExecutionImportRow[]
+): ImportValidationError[] {
+  const errors: ImportValidationError[] = [];
+
+  if (rows.length === 0) {
+    errors.push({
+      rowNumber: 0,
+      field: "studentNames",
+      message: "没有可执行的导入数据，请检查学生名单是否为空。",
+    });
+
+    return errors;
+  }
+
+  rows.forEach((row) => {
+    if (!safeText(row.studentName)) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: "studentName",
+        message: "执行导入时缺少学生姓名。",
+      });
+    }
+
+    if (!safeText(row.studentUsername)) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: "studentUsername",
+        message: `学生「${row.studentName || "未知学生"}」无法生成用户名，请检查姓名。`,
+      });
+    }
+
+    if (!safeText(row.studentAuthEmail)) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: "studentAuthEmail",
+        message: `学生「${row.studentName || "未知学生"}」无法生成登录邮箱，请检查姓名。`,
+      });
+    }
+
+    if (!safeText(row.teacherEmail)) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: "teacherEmail",
+        message: "执行导入时缺少小老师邮箱。",
+      });
+    }
+  });
+
+  return errors;
 }
 
 async function getCurrentAdminFromRequest(request: Request) {
@@ -66,14 +214,14 @@ async function getCurrentAdminFromRequest(request: Request) {
   return admin;
 }
 
-async function findArchivedReuseCandidates(rows: PreviewImportRow[]) {
+async function findArchivedReuseCandidates(rows: ExecutionImportRow[]) {
   const candidates: BulkImportReuseCandidate[] = [];
 
   const checkedTeacherEmails = new Set<string>();
   const checkedStudentUsernames = new Set<string>();
 
   for (const row of rows) {
-    const teacherEmail = row.teacherEmail.trim().toLowerCase();
+    const teacherEmail = safeText(row.teacherEmail).toLowerCase();
 
     if (teacherEmail && !checkedTeacherEmails.has(teacherEmail)) {
       checkedTeacherEmails.add(teacherEmail);
@@ -102,7 +250,7 @@ async function findArchivedReuseCandidates(rows: PreviewImportRow[]) {
       }
     }
 
-    const studentUsername = row.studentUsername.trim().toLowerCase();
+    const studentUsername = safeText(row.studentUsername).toLowerCase();
 
     if (studentUsername && !checkedStudentUsernames.has(studentUsername)) {
       checkedStudentUsernames.add(studentUsername);
@@ -141,23 +289,36 @@ export async function POST(request: Request) {
 
     const body = await request.json();
 
-    const parsedRows = (body.rows || []) as ParsedImportRow[];
+    const previewRows = (body.rows || []) as PreviewImportRow[];
     const allowReuseArchived = Boolean(body.allowReuseArchived);
 
-    const previewRows = buildPreviewRows(parsedRows);
-    const validationErrors = validateImportRows(previewRows);
+    const previewValidationErrors = validateImportRows(previewRows);
 
-    if (validationErrors.length > 0) {
+    if (previewValidationErrors.length > 0) {
       return NextResponse.json(
         {
           message: "导入数据存在格式问题。",
-          errors: validationErrors,
+          errors: previewValidationErrors,
         },
         { status: 400 }
       );
     }
 
-    const reuseCandidates = await findArchivedReuseCandidates(previewRows);
+    const executionRows = expandPreviewRowsToExecutionRows(previewRows);
+
+    const executionErrors = validateExecutionRowsLightly(executionRows);
+
+    if (executionErrors.length > 0) {
+      return NextResponse.json(
+        {
+          message: "导入执行数据生成失败。",
+          errors: executionErrors,
+        },
+        { status: 400 }
+      );
+    }
+
+    const reuseCandidates = await findArchivedReuseCandidates(executionRows);
 
     if (reuseCandidates.length > 0 && !allowReuseArchived) {
       return NextResponse.json(
@@ -171,14 +332,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await executeBulkImport(previewRows, {
+    const result = await executeBulkImport(executionRows, {
       allowReuseArchived,
     });
 
     return NextResponse.json({
       message: "批量导入完成。",
       requestedBy: currentAdmin.name,
-      receivedRows: previewRows.length,
+      receivedRows: executionRows.length,
       result,
     });
   } catch (error) {

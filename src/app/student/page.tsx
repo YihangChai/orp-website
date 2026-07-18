@@ -35,6 +35,7 @@ type ClassRow = {
   school: string | null;
   status: string;
   class_code: string | null;
+  subject: string | null;
   cohorts: CohortRow | null;
   class_teachers: ClassTeacherRelation[];
 };
@@ -80,12 +81,25 @@ type StudentLessonComment = {
 
 type StudentHomePageData = {
   student: StudentRow;
-  classRelation: ClassRelation;
+  classRelations: ClassRelation[];
+  selectedClassRelation: ClassRelation;
+  selectedClassId: string;
   classmates: StudentRow[];
   goals: TeachingGoal[];
   records: LessonRecord[];
   latestRecordComments: StudentLessonComment[];
 };
+
+function getSubjectLabel(subject: string | null | undefined) {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "暂未设置";
+}
+
+function buildStudentClassLink(path: string, classId: string | null) {
+  if (!classId) return path;
+  return `${path}?classId=${encodeURIComponent(classId)}`;
+}
 
 export default function StudentPage() {
   return (
@@ -98,12 +112,14 @@ export default function StudentPage() {
 function StudentHomeContent() {
   const currentStudent = useCurrentStudent();
 
+  const [selectedClassId, setSelectedClassId] = useState("");
   const [pageData, setPageData] = useState<StudentHomePageData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   async function loadStudentHomePageData(
-    activeStudent: CurrentStudent
+    activeStudent: CurrentStudent,
+    requestedClassId: string
   ): Promise<StudentHomePageData> {
     const { data: studentFromSupabase, error: studentError } = await supabase
       .from("students")
@@ -140,6 +156,7 @@ function StudentHomeContent() {
             school,
             status,
             class_code,
+            subject,
             cohorts (
               id,
               name,
@@ -161,21 +178,35 @@ function StudentHomeContent() {
       throw new Error(`读取班级信息失败：${classRelationError.message}`);
     }
 
-    const relation = (
+    const allClassRelations = (
       (classRelationsFromSupabase || []) as unknown as ClassRelation[]
-    )[0];
+    ).filter((relation) => Boolean(relation.classes));
 
-    if (!relation) {
-      throw new Error("没有找到你的班级信息，请联系 ORP 管理员。");
+    const activeClassRelations = allClassRelations.filter((relation) => {
+      const classItem = relation.classes;
+
+      if (!classItem) return false;
+      if (classItem.status === "archived") return false;
+      if (classItem.status === "withdrawn") return false;
+      if (classItem.cohorts?.status === "archived") return false;
+
+      return true;
+    });
+
+    if (activeClassRelations.length === 0) {
+      throw new Error("没有找到你的可用班级信息，请联系 ORP 管理员。");
     }
 
-    const activeClassId = relation.class_id;
+    const requestedRelation = requestedClassId
+      ? activeClassRelations.find(
+          (relation) => relation.class_id === requestedClassId
+        )
+      : null;
 
-    const [
-      classmatesResult,
-      goalsResult,
-      recordsResult,
-    ] = await Promise.all([
+    const selectedRelation = requestedRelation || activeClassRelations[0];
+    const activeClassId = selectedRelation.class_id;
+
+    const [classmatesResult, goalsResult, recordsResult] = await Promise.all([
       supabase
         .from("class_students")
         .select(
@@ -253,7 +284,9 @@ function StudentHomeContent() {
 
     return {
       student: studentData,
-      classRelation: relation,
+      classRelations: activeClassRelations,
+      selectedClassRelation: selectedRelation,
+      selectedClassId: activeClassId,
       classmates: classmateRows,
       goals: (goalsResult.data || []) as TeachingGoal[],
       records: lessonRecords,
@@ -269,11 +302,18 @@ function StudentHomeContent() {
       setMessage("");
 
       try {
-        const loadedPageData = await loadStudentHomePageData(currentStudent);
+        const loadedPageData = await loadStudentHomePageData(
+          currentStudent,
+          selectedClassId
+        );
 
         if (!isMounted) return;
 
         setPageData(loadedPageData);
+
+        if (selectedClassId !== loadedPageData.selectedClassId) {
+          setSelectedClassId(loadedPageData.selectedClassId);
+        }
       } catch (error) {
         if (!isMounted) return;
 
@@ -294,7 +334,7 @@ function StudentHomeContent() {
     return () => {
       isMounted = false;
     };
-  }, [currentStudent]);
+  }, [currentStudent, selectedClassId]);
 
   const currentGoal = pageData?.goals[0] || null;
   const latestRecord = pageData?.records[0] || null;
@@ -309,24 +349,31 @@ function StudentHomeContent() {
 
   const expectedLessons = currentGoal?.expected_lessons || 0;
 
+  const selectedClass = pageData?.selectedClassRelation.classes || null;
+  const hasMultipleClasses = (pageData?.classRelations.length || 0) > 1;
+
   const teacherNames = useMemo(() => {
     return Array.from(
       new Set(
-        (pageData?.classRelation.classes?.class_teachers || [])
+        (selectedClass?.class_teachers || [])
           .map((item) => item.teachers?.name)
           .filter(Boolean)
       )
     );
-  }, [pageData?.classRelation.classes?.class_teachers]);
+  }, [selectedClass?.class_teachers]);
 
   const classmateNames = useMemo(() => {
     return (pageData?.classmates || []).map((classmate) => classmate.name);
   }, [pageData?.classmates]);
 
+  const currentClassId = pageData?.selectedClassId || selectedClassId || "";
+  const lessonsLink = buildStudentClassLink("/student/lessons", currentClassId);
+  const parentLink = buildStudentClassLink("/student/parent", currentClassId);
+
   const studentInfo = {
     name: pageData?.student.name || currentStudent.name || "学生",
-    className:
-      pageData?.classRelation.classes?.name || "暂未读取班级",
+    className: selectedClass?.name || "暂未读取班级",
+    subjectName: getSubjectLabel(selectedClass?.subject),
     classmateName:
       classmateNames.length > 0 ? classmateNames.join("、") : "暂无其他同学",
     teacherName: teacherNames.length > 0 ? teacherNames.join("、") : "暂无小老师",
@@ -351,6 +398,38 @@ function StudentHomeContent() {
           </div>
         )}
 
+        {pageData && hasMultipleClasses && (
+          <section className="mb-6 rounded-[1.5rem] border border-emerald-100 bg-white p-5 shadow-sm">
+            <p className="text-sm font-semibold text-emerald-700">
+              选择当前班级
+            </p>
+
+            <p className="mt-2 text-sm leading-7 text-stone-600">
+              你同时参加了多个 ORP 班级。请选择当前想查看的班级，下面的学习计划、课程记录、同学和小老师会跟随切换。
+            </p>
+
+            <select
+              value={currentClassId}
+              onChange={(event) => setSelectedClassId(event.target.value)}
+              className="mt-4 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm font-semibold text-emerald-950 outline-none transition focus:border-emerald-500 focus:bg-white"
+            >
+              {pageData.classRelations.map((relation) => {
+                const classItem = relation.classes;
+                const className = classItem?.name || "未命名班级";
+                const subjectName = getSubjectLabel(classItem?.subject);
+                const cohortName = classItem?.cohorts?.name || "";
+
+                return (
+                  <option key={relation.class_id} value={relation.class_id}>
+                    {className} · {subjectName}
+                    {cohortName ? ` · ${cohortName}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </section>
+        )}
+
         <section className="grid gap-5 md:grid-cols-[0.8fr_1.4fr]">
           <aside className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
             <div className="flex items-center gap-4">
@@ -371,9 +450,16 @@ function StudentHomeContent() {
 
             <div className="mt-5 space-y-3">
               <div className="rounded-2xl bg-[#fffdf4] px-4 py-3">
-                <p className="text-xs text-stone-500">班级</p>
+                <p className="text-xs text-stone-500">当前班级</p>
                 <p className="mt-1 text-sm font-semibold text-emerald-950">
                   {studentInfo.className}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-[#fffdf4] px-4 py-3">
+                <p className="text-xs text-stone-500">学科</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-950">
+                  {studentInfo.subjectName}
                 </p>
               </div>
 
@@ -403,7 +489,7 @@ function StudentHomeContent() {
             </h1>
 
             <p className="mt-3 text-sm leading-7 text-stone-600">
-              这里会帮你记住最近学了什么、课后要做什么，也可以给小老师留一句话。
+              这里会帮你记住当前班级最近学了什么、课后要做什么，也可以给小老师留一句话。
             </p>
 
             <div className="mt-5 rounded-2xl bg-[#fffdf4] p-5">
@@ -461,10 +547,14 @@ function StudentHomeContent() {
               <h2 className="text-xl font-bold text-emerald-950">
                 最近一次上课
               </h2>
+
+              <p className="mt-1 text-sm text-stone-500">
+                当前班级：{studentInfo.className} · {studentInfo.subjectName}
+              </p>
             </div>
 
             <Link
-              href="/student/lessons"
+              href={lessonsLink}
               className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
             >
               查看全部课程
@@ -549,7 +639,7 @@ function StudentHomeContent() {
                 </div>
 
                 <Link
-                  href="/student/lessons"
+                  href={lessonsLink}
                   className="mt-3 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
                 >
                   {hasCommentForLatestRecord
@@ -560,7 +650,7 @@ function StudentHomeContent() {
             </article>
           ) : (
             <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 leading-7 text-stone-600">
-              目前还没有课程记录。
+              当前班级目前还没有课程记录。
             </p>
           )}
         </section>
@@ -569,12 +659,11 @@ function StudentHomeContent() {
           <h2 className="text-xl font-bold text-emerald-950">家长模式</h2>
 
           <p className="mt-2 text-sm leading-7 text-stone-600">
-            家长可以查看孩子最近的学习情况、课程记录和学习计划，也可以给
-            ORP 留下一些反馈。
+            家长可以查看孩子当前班级的学习情况、课程记录和学习计划，也可以给 ORP 留下一些反馈。
           </p>
 
           <Link
-            href="/student/parent"
+            href={parentLink}
             className="mt-4 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
           >
             进入家长模式
