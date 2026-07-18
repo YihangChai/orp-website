@@ -7,7 +7,9 @@ export type MaintenanceActionType =
   | "add_teacher_to_class"
   | "remove_teacher_from_class"
   | "add_student_to_class"
-  | "remove_student_from_class";
+  | "remove_student_from_class"
+  | "reset_teacher_password"
+  | "reset_student_password";
 
 export type MaintenanceTargetType = "cohort" | "class" | "teacher" | "student";
 

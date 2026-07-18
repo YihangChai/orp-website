@@ -40,6 +40,13 @@ type OverviewData = {
   approvals: AdminActionApproval[];
 };
 
+type ResetPasswordResult = {
+  role: "teacher" | "student";
+  name: string;
+  account: string | null;
+  newPassword: string;
+};
+
 function getActionLabel(actionType: string) {
   if (actionType === "archive_cohort") return "整届封存";
   if (actionType === "delete_class") return "删除/封存班级";
@@ -50,6 +57,8 @@ function getActionLabel(actionType: string) {
   if (actionType === "remove_teacher_from_class") return "移除小老师";
   if (actionType === "add_student_to_class") return "添加学生";
   if (actionType === "remove_student_from_class") return "移除学生";
+  if (actionType === "reset_teacher_password") return "重置小老师密码";
+  if (actionType === "reset_student_password") return "重置学生密码";
   return actionType;
 }
 
@@ -88,6 +97,8 @@ function AdminMaintenanceContent() {
   const [data, setData] = useState<OverviewData | null>(null);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [resetPasswordResult, setResetPasswordResult] =
+    useState<ResetPasswordResult | null>(null);
 
   const [classKeyword, setClassKeyword] = useState("");
   const [selectedClassId, setSelectedClassId] = useState("");
@@ -311,6 +322,7 @@ function AdminMaintenanceContent() {
     setEditClassName(classItem.name);
     setEditClassSchool(classItem.school || "");
     setMessage("");
+    setResetPasswordResult(null);
   }
 
   async function handleCreateRequest(params: {
@@ -335,6 +347,7 @@ function AdminMaintenanceContent() {
 
     try {
       const result = await createMaintenanceRequest(params);
+      setResetPasswordResult(null);
       setMessage(result.message || "申请已创建。");
       await refreshData();
     } catch (error) {
@@ -344,13 +357,20 @@ function AdminMaintenanceContent() {
 
   async function handleApproveRequest(requestId: string) {
     const confirmed = window.confirm(
-      "确认批准这项申请吗？同一管理员不能重复确认。"
+      "确认批准这项申请吗？同一管理员不能重复确认。密码重置申请会在最后一位管理员确认后立即执行。"
     );
 
     if (!confirmed) return;
 
     try {
       const result = await approveMaintenanceRequest(requestId);
+
+      if (result.resetPassword) {
+        setResetPasswordResult(result.resetPassword as ResetPasswordResult);
+      } else {
+        setResetPasswordResult(null);
+      }
+
       setMessage(result.message || "已确认。");
       await refreshData();
     } catch (error) {
@@ -367,6 +387,7 @@ function AdminMaintenanceContent() {
 
     try {
       const result = await cancelMaintenanceRequest(requestId);
+      setResetPasswordResult(null);
       setMessage(result.message || "申请已取消。");
       await refreshData();
     } catch (error) {
@@ -447,6 +468,18 @@ function AdminMaintenanceContent() {
     });
   }
 
+  function handleCreateResetTeacherPasswordRequest(
+    teacher: MaintenanceTeacherItem
+  ) {
+    handleCreateRequest({
+      actionType: "reset_teacher_password",
+      targetType: "teacher",
+      targetId: teacher.id,
+      targetName: teacher.name,
+      note: `申请重置小老师「${teacher.name}」的登录密码。旧密码会在申请完成后失效。`,
+    });
+  }
+
   function handleCreateAddStudentRequest() {
     if (!selectedClass || !selectedStudentToAdd) {
       setMessage("请先选择班级和学生。");
@@ -493,6 +526,18 @@ function AdminMaintenanceContent() {
     });
   }
 
+  function handleCreateResetStudentPasswordRequest(
+    student: MaintenanceStudentItem
+  ) {
+    handleCreateRequest({
+      actionType: "reset_student_password",
+      targetType: "student",
+      targetId: student.id,
+      targetName: student.name,
+      note: `申请重置学生「${student.name}」的登录密码。旧密码会在申请完成后失效。`,
+    });
+  }
+
   if (isLoading) {
     return (
       <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
@@ -527,18 +572,16 @@ function AdminMaintenanceContent() {
             </h1>
 
             <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              维护中心只显示运行中的班级。所有修改、移除、添加、删除/归档操作都会先创建申请，需要所有 active 管理员确认后才会执行。
+              维护中心只显示运行中的班级。所有修改、移除、添加、删除/归档、密码重置操作都会先创建申请，需要所有 active 管理员确认后才会执行。
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/admin"
-              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-            >
-              返回管理员首页
-            </Link>
-          </div>
+          <Link
+            href="/admin"
+            className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+          >
+            返回管理员首页
+          </Link>
         </div>
 
         {message && (
@@ -547,14 +590,58 @@ function AdminMaintenanceContent() {
           </div>
         )}
 
+        {resetPasswordResult && (
+          <section className="mb-6 rounded-[1.75rem] border border-emerald-200 bg-white p-5 shadow-sm md:p-6">
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <h2 className="text-xl font-bold text-emerald-950">
+                  新临时密码
+                </h2>
+
+                <p className="mt-2 text-sm leading-7 text-stone-600">
+                  请现在复制并私下发给本人。关闭或刷新页面后，这个临时密码不会再次显示。
+                </p>
+              </div>
+
+              <span className="w-fit rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+                只显示一次
+              </span>
+            </div>
+
+            <div className="mt-5 rounded-2xl bg-[#fffdf4] p-5">
+              <p className="text-sm text-stone-500">
+                {resetPasswordResult.role === "teacher" ? "小老师" : "学生"}
+              </p>
+
+              <p className="mt-1 font-bold text-emerald-950">
+                {resetPasswordResult.name}
+              </p>
+
+              <p className="mt-3 text-sm text-stone-500">
+                账号：{resetPasswordResult.account || "暂无账号信息"}
+              </p>
+
+              <p className="mt-4 break-all rounded-2xl bg-white p-4 text-2xl font-bold tracking-wide text-emerald-950">
+                {resetPasswordResult.newPassword}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setResetPasswordResult(null)}
+              className="mt-4 rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
+            >
+              我已复制，关闭显示
+            </button>
+          </section>
+        )}
+
         <section className="mb-6 grid gap-4 md:grid-cols-4">
           <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
             <p className="text-sm text-stone-500">Active 管理员</p>
-
             <p className="mt-2 text-3xl font-bold text-emerald-950">
               {data.activeAdminCount}
             </p>
-
             <p className="mt-1 text-xs text-stone-500">
               新申请需要同等人数确认
             </p>
@@ -562,17 +649,14 @@ function AdminMaintenanceContent() {
 
           <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
             <p className="text-sm text-stone-500">可维护班级</p>
-
             <p className="mt-2 text-3xl font-bold text-emerald-950">
               {data.classes.length}
             </p>
-
             <p className="mt-1 text-xs text-stone-500">仅运行中班级</p>
           </div>
 
           <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
             <p className="text-sm text-stone-500">小老师 / 学生</p>
-
             <p className="mt-2 text-3xl font-bold text-emerald-950">
               {data.teachers.length} / {data.students.length}
             </p>
@@ -580,7 +664,6 @@ function AdminMaintenanceContent() {
 
           <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
             <p className="text-sm text-stone-500">待确认申请</p>
-
             <p className="mt-2 text-3xl font-bold text-emerald-950">
               {data.requests.length}
             </p>
@@ -735,7 +818,7 @@ function AdminMaintenanceContent() {
                     </h3>
 
                     <p className="mt-2 text-sm leading-7 text-stone-600">
-                      当前班级共有 {classTeachers.length} 位小老师。添加、移除、删除/归档都需要管理员确认。
+                      当前班级共有 {classTeachers.length} 位小老师。添加、移除、删除/归档、重置密码都需要管理员确认。
                     </p>
 
                     <div className="mt-4 space-y-3">
@@ -762,6 +845,18 @@ function AdminMaintenanceContent() {
                               </div>
 
                               <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCreateResetTeacherPasswordRequest(
+                                      teacher
+                                    )
+                                  }
+                                  className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                                >
+                                  重置密码申请
+                                </button>
+
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -844,7 +939,7 @@ function AdminMaintenanceContent() {
                     </h3>
 
                     <p className="mt-2 text-sm leading-7 text-stone-600">
-                      当前班级共有 {classStudents.length} 位学生。添加、移除、删除/归档都需要管理员确认。
+                      当前班级共有 {classStudents.length} 位学生。添加、移除、删除/归档、重置密码都需要管理员确认。
                     </p>
 
                     <div className="mt-4 space-y-3">
@@ -872,6 +967,18 @@ function AdminMaintenanceContent() {
                               </div>
 
                               <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCreateResetStudentPasswordRequest(
+                                      student
+                                    )
+                                  }
+                                  className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                                >
+                                  重置密码申请
+                                </button>
+
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -958,7 +1065,7 @@ function AdminMaintenanceContent() {
 
                   <p className="mt-2 text-sm leading-7 text-stone-600">
                     这里显示当前班级本身，以及当前班级成员相关的待确认申请。创建申请时需要{" "}
-                    {data.activeAdminCount} 位 active 管理员确认。
+                    {data.activeAdminCount} 位 active 管理员确认。密码重置申请会在最后一位管理员确认后立即执行，并只显示一次新临时密码。
                   </p>
 
                   {pendingRequestsForSelectedClass.length === 0 ? (

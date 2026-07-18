@@ -57,7 +57,7 @@ const navItems = [
   ["班级管理", "/admin/classes"],
   ["小老师管理", "/admin/teachers"],
   ["学生管理", "/admin/students"],
-  ["留言中心", "/admin/messages"],
+  ["留言中心", "/admin/comments"],
   ["数据统计", "/admin/stats"],
   ["维护中心", "/admin/maintenance"]
 ];
