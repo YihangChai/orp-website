@@ -514,10 +514,6 @@ function AdminStatisticsContent() {
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               ORP 数据统计
             </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里展示 ORP 所有届别的总数据，用于了解项目规模、课程活跃度、出勤情况和整体运营健康。单个学生、老师、班级的完整记录仍然在详情页查看。
-            </p>
           </div>
 
           <Link
@@ -623,7 +619,7 @@ function AdminStatisticsContent() {
               </div>
 
               <p className="mt-5 text-xs leading-6 text-stone-500">
-                这些不是最终评价标准，只是帮助管理员快速发现：是否有班级最近没有上课、是否有目标没有推进、是否有反馈数据积累。
+                不能最为最终评价标准，仅供参考
               </p>
             </div>
           </div>
@@ -632,10 +628,6 @@ function AdminStatisticsContent() {
         <section className="mt-6 grid gap-4 lg:grid-cols-[1fr_1fr]">
           <div className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
             <h2 className="text-xl font-bold text-emerald-950">届别对比</h2>
-
-            <p className="mt-2 text-sm leading-7 text-stone-600">
-              这里按届别汇总班级、学生、小老师和课程数量，用于观察不同届别的规模和活跃度。
-            </p>
 
             {statistics.cohortSummaries.length === 0 ? (
               <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm text-stone-600">

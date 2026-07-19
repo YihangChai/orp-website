@@ -13,6 +13,11 @@ import AdminGuard from "@/components/AdminGuard";
  * 4. 本页面不再展示旧版 student_code / pin_code / 班级码登录机制。
  * 5. 管理员在这里主要观察学生参与情况：出勤率、近 30 天上课次数、最近上课时间、关注状态。
  * 6. “待维护”包含：状态异常，或者 active 但未绑定班级。
+ *
+ * 学科规则：
+ * - students 不存 subject。
+ * - 学生学科由 class_students -> classes.subject 推导。
+ * - 一个学生可以同时有英语和数学两个学科。
  */
 
 type StudentRow = {
@@ -25,6 +30,13 @@ type StudentRow = {
   created_at: string;
 };
 
+type StudentClassSummary = {
+  classId: string;
+  className: string;
+  subject: string | null;
+  teacherNames: string[];
+};
+
 type StudentTableItem = {
   id: string;
   name: string;
@@ -35,9 +47,10 @@ type StudentTableItem = {
 
   classIds: string[];
   classNames: string[];
-  classDescriptions: string[];
+  classSummaries: StudentClassSummary[];
   cohortIds: string[];
   teacherNames: string[];
+  subjects: string[];
 
   lessonCount: number;
   recentThirtyDaysLessonCount: number;
@@ -98,6 +111,18 @@ function getStudentStatusClassName(status: string) {
   if (status === "withdrawn") return "bg-amber-50 text-amber-700";
   if (status === "archived") return "bg-stone-100 text-stone-500";
   if (status === "delete_requested") return "bg-red-50 text-red-700";
+  return "bg-stone-100 text-stone-500";
+}
+
+function getSubjectLabel(subject: string | null | undefined) {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "未设置";
+}
+
+function getSubjectClassName(subject: string | null | undefined) {
+  if (subject === "english") return "bg-sky-50 text-sky-700";
+  if (subject === "math") return "bg-violet-50 text-violet-700";
   return "bg-stone-100 text-stone-500";
 }
 
@@ -187,6 +212,10 @@ function isWithinRecentThirtyDays(dateString: string) {
   return lessonDate >= thirtyDaysAgo && lessonDate <= today;
 }
 
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
 export default function AdminStudentsPage() {
   return (
     <AdminGuard>
@@ -228,7 +257,7 @@ function AdminStudentsContent() {
           classes (
             id,
             name,
-            school,
+            subject,
             status,
             cohort_id,
             cohorts (
@@ -295,40 +324,44 @@ function AdminStudentsContent() {
             .map((relation) => relation.classes?.name)
             .filter(Boolean) as string[];
 
-          const cohortIds = Array.from(
-            new Set(
-              studentClassRelations
-                .map((relation) => relation.classes?.cohorts?.id)
-                .filter(Boolean) as string[]
-            )
+          const cohortIds = uniqueStrings(
+            studentClassRelations
+              .map((relation) => relation.classes?.cohorts?.id)
+              .filter(Boolean) as string[]
           );
 
-          const classDescriptions = studentClassRelations
+          const subjects = uniqueStrings(
+            studentClassRelations
+              .map((relation) => relation.classes?.subject)
+              .filter(Boolean) as string[]
+          );
+
+          const classSummaries = studentClassRelations
             .map((relation) => {
               const classItem = relation.classes;
 
               if (!classItem) return null;
 
-              const cohortName = classItem.cohorts?.name || "未设置届别";
-              const schoolName = classItem.school || "未填写学校";
-              const classStatus =
-                classItem.status === "active" ? "运行中" : "已封存/历史";
+              const classTeachers = classItem.class_teachers || [];
 
-              return `${classItem.name} · ${cohortName} · ${schoolName} · ${classStatus}`;
-            })
-            .filter(Boolean) as string[];
-
-          const teacherNames = Array.from(
-            new Set(
-              studentClassRelations.flatMap((relation) => {
-                const classTeachers = relation.classes?.class_teachers || [];
-
-                return classTeachers
+              const teacherNames = uniqueStrings(
+                classTeachers
                   .map((item: any) => item.teachers?.name)
-                  .filter(Boolean);
-              })
-            )
-          ) as string[];
+                  .filter(Boolean)
+              );
+
+              return {
+                classId: relation.class_id,
+                className: classItem.name || "未知班级",
+                subject: classItem.subject || null,
+                teacherNames,
+              };
+            })
+            .filter(Boolean) as StudentClassSummary[];
+
+          const teacherNames = uniqueStrings(
+            classSummaries.flatMap((summary) => summary.teacherNames)
+          );
 
           const studentLessons = lessonRows.filter((lesson) => {
             if (!lesson.class_id) return false;
@@ -373,9 +406,10 @@ function AdminStudentsContent() {
 
             classIds,
             classNames,
-            classDescriptions,
+            classSummaries,
             cohortIds,
             teacherNames,
+            subjects,
 
             lessonCount: studentLessons.length,
             recentThirtyDaysLessonCount,
@@ -446,8 +480,8 @@ function AdminStudentsContent() {
           student.grade || "",
           student.note || "",
           student.classNames.join(" "),
-          student.classDescriptions.join(" "),
           student.teacherNames.join(" "),
+          student.subjects.map(getSubjectLabel).join(" "),
           getStudentStatusLabel(student.status),
         ]
           .join(" ")
@@ -458,7 +492,13 @@ function AdminStudentsContent() {
     }
 
     return result;
-  }, [students, selectedCohortId, selectedStatusView, keyword]);
+  }, [
+    students,
+    selectedCohortId,
+    selectedStatusView,
+    keyword,
+    isSelectedCohortArchived,
+  ]);
 
   const currentStudentCount = useMemo(() => {
     return students.filter(isCurrentStudent).length;
@@ -503,10 +543,6 @@ function AdminStudentsContent() {
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               学生查询
             </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              本页面只用于查看学生、班级、小老师、出勤率和近 30 天上课情况。学生状态修改、班级调整、删除/归档、密码重置等维护操作统一放到维护中心处理。
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -614,7 +650,9 @@ function AdminStudentsContent() {
                 {!isSelectedCohortArchived && (
                   <select
                     value={selectedStatusView}
-                    onChange={(event) => setSelectedStatusView(event.target.value)}
+                    onChange={(event) =>
+                      setSelectedStatusView(event.target.value)
+                    }
                     className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
                   >
                     <option value="current">当前学生</option>
@@ -623,10 +661,11 @@ function AdminStudentsContent() {
                     <option value="archived">已归档学生</option>
                   </select>
                 )}
+
                 <input
                   value={keyword}
                   onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="搜索学生、用户名、班级、老师..."
+                  placeholder="搜索学生、学科、班级、老师..."
                   className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
                 />
               </div>
@@ -643,10 +682,11 @@ function AdminStudentsContent() {
             </p>
           ) : (
             <div className="mt-6 overflow-x-auto rounded-2xl border border-emerald-100">
-              <table className="w-full min-w-[1150px] border-collapse bg-white text-left text-sm">
+              <table className="w-full min-w-[1180px] border-collapse bg-white text-left text-sm">
                 <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
                   <tr>
                     <th className="px-4 py-3 font-semibold">学生</th>
+                    <th className="px-4 py-3 font-semibold">学科</th>
                     <th className="px-4 py-3 font-semibold">班级 / 小老师</th>
                     <th className="px-4 py-3 font-semibold">出勤率</th>
                     <th className="px-4 py-3 font-semibold">近 30 天</th>
@@ -681,31 +721,52 @@ function AdminStudentsContent() {
                         </td>
 
                         <td className="px-4 py-4">
-                          {student.classDescriptions.length === 0 ? (
+                          {student.subjects.length === 0 ? (
+                            <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-500">
+                              未设置
+                            </span>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {student.subjects.map((subject) => (
+                                <span
+                                  key={`${student.id}-${subject}`}
+                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
+                                    subject
+                                  )}`}
+                                >
+                                  {getSubjectLabel(subject)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-4">
+                          {student.classSummaries.length === 0 ? (
                             <p className="text-sm text-red-500">
                               暂未绑定班级
                             </p>
                           ) : (
-                            <div className="space-y-1">
-                              {student.classDescriptions.map(
-                                (description, index) => (
-                                  <p
-                                    key={`${student.id}-${description}-${index}`}
-                                    className="rounded-full bg-[#fffdf4] px-3 py-1 text-xs text-stone-600"
-                                  >
-                                    {description}
+                            <div className="space-y-2">
+                              {student.classSummaries.map((summary) => (
+                                <div
+                                  key={`${student.id}-${summary.classId}`}
+                                  className="rounded-2xl bg-[#fffdf4] px-3 py-2 text-xs text-stone-600"
+                                >
+                                  <p className="font-semibold text-emerald-950">
+                                    {summary.className}
                                   </p>
-                                )
-                              )}
+
+                                  <p className="mt-1 text-stone-500">
+                                    小老师：
+                                    {summary.teacherNames.length > 0
+                                      ? summary.teacherNames.join("、")
+                                      : "暂无"}
+                                  </p>
+                                </div>
+                              ))}
                             </div>
                           )}
-
-                          <p className="mt-2 text-xs text-stone-500">
-                            小老师：
-                            {student.teacherNames.length > 0
-                              ? student.teacherNames.join("、")
-                              : "暂无"}
-                          </p>
                         </td>
 
                         <td className="px-4 py-4">
@@ -728,9 +789,7 @@ function AdminStudentsContent() {
                             {student.recentThirtyDaysLessonCount}
                           </p>
 
-                          <p className="mt-1 text-xs text-stone-500">
-                            次课程
-                          </p>
+                          <p className="mt-1 text-xs text-stone-500">次课程</p>
                         </td>
 
                         <td className="px-4 py-4">

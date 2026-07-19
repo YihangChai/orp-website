@@ -213,10 +213,6 @@ function AdminMessagesContent() {
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               留言中心
             </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里集中查看学生课程反馈和家长/老师留言。MVP 阶段只做查看和整理准备，不直接发布到首页或故事页面。
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">

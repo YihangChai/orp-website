@@ -11,14 +11,20 @@ import AdminGuard from "@/components/AdminGuard";
  * 2. 本页面只负责小老师统计、查询和详情入口。
  * 3. 小老师账号创建、密码重置、班级调整、删除/归档等维护操作，统一放到 /admin/maintenance。
  * 4. 本页面不再展示账号绑定判断，不再处理删除申请或高风险操作。
- * 5. 管理员在这里主要观察小老师负责班级、学生数量、课程次数、近 30 天上课次数、近 4 周活跃情况。
- * 6. “待维护”包含：状态异常，或者 active 但未分配班级。
+ * 5. 管理员在这里主要观察小老师学科、负责班级、学生数量、课程次数、近 30 天上课次数、近 4 周活跃情况。
+ * 6. “待维护”包含：状态异常、缺少学科，或者 active 但未分配班级。
+ *
+ * 展示原则：
+ * - 首页必须显示老师学科。
+ * - 负责班级栏只显示“班级名称 · 届别”，不重复学校、班级状态、班级学科。
+ * - 最近上课日期不在列表页显示，避免表格过宽；详情页再看完整记录。
  */
 
 type TeacherRow = {
   id: string;
   name: string;
   email: string | null;
+  subject: string | null;
   status: string;
   created_at: string;
 };
@@ -27,6 +33,7 @@ type TeacherTableItem = {
   id: string;
   name: string;
   email: string | null;
+  subject: string | null;
   status: string;
 
   classNames: string[];
@@ -38,7 +45,6 @@ type TeacherTableItem = {
   lessonCount: number;
   recentThirtyDaysLessonCount: number;
   totalMinutes: number;
-  recentLessonDate: string | null;
   recentFourWeeksCount: number;
 };
 
@@ -48,7 +54,6 @@ type ClassTeacherRow = {
   classes: {
     id: string;
     name: string;
-    school: string | null;
     status: string;
     cohorts: {
       id: string;
@@ -84,7 +89,8 @@ function isCurrentTeacher(teacher: TeacherTableItem) {
 function isMaintenanceTeacher(teacher: TeacherTableItem) {
   return (
     (teacher.status !== "active" && teacher.status !== "archived") ||
-    (teacher.status === "active" && teacher.classIds.length === 0)
+    (teacher.status === "active" && teacher.classIds.length === 0) ||
+    (teacher.status === "active" && !teacher.subject)
   );
 }
 
@@ -104,6 +110,18 @@ function getTeacherStatusClassName(status: string) {
   return "bg-stone-100 text-stone-500";
 }
 
+function getSubjectLabel(subject: string | null | undefined) {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "未设置";
+}
+
+function getSubjectClassName(subject: string | null | undefined) {
+  if (subject === "english") return "bg-sky-50 text-sky-700";
+  if (subject === "math") return "bg-violet-50 text-violet-700";
+  return "bg-stone-100 text-stone-500";
+}
+
 function getAttentionLabel(teacher: TeacherTableItem) {
   if (teacher.status === "archived") {
     return {
@@ -115,6 +133,13 @@ function getAttentionLabel(teacher: TeacherTableItem) {
   if (teacher.status !== "active") {
     return {
       text: "待维护：状态异常",
+      className: "bg-red-50 text-red-700",
+    };
+  }
+
+  if (!teacher.subject) {
+    return {
+      text: "待维护：缺少学科",
       className: "bg-red-50 text-red-700",
     };
   }
@@ -227,7 +252,7 @@ function AdminTeachersContent() {
     try {
       const { data: teacherData, error: teacherError } = await supabase
         .from("teachers")
-        .select("id, name, email, status, created_at")
+        .select("id, name, email, subject, status, created_at")
         .order("created_at", { ascending: false });
 
       if (teacherError) {
@@ -242,7 +267,6 @@ function AdminTeachersContent() {
           classes (
             id,
             name,
-            school,
             status,
             cohorts (
               id,
@@ -319,11 +343,8 @@ function AdminTeachersContent() {
               if (!classItem) return null;
 
               const cohortName = classItem.cohorts?.name || "未设置届别";
-              const schoolName = classItem.school || "未填写学校";
-              const classStatus =
-                classItem.status === "active" ? "运行中" : "已封存/历史";
 
-              return `${classItem.name} · ${cohortName} · ${schoolName} · ${classStatus}`;
+              return `${classItem.name} · ${cohortName}`;
             })
             .filter(Boolean) as string[];
 
@@ -348,16 +369,11 @@ function AdminTeachersContent() {
             0
           );
 
-          const sortedLessons = [...teacherLessons].sort(
-            (a, b) =>
-              new Date(b.lesson_date).getTime() -
-              new Date(a.lesson_date).getTime()
-          );
-
           return {
             id: teacher.id,
             name: teacher.name,
             email: teacher.email,
+            subject: teacher.subject,
             status: teacher.status || "active",
 
             classNames,
@@ -369,7 +385,6 @@ function AdminTeachersContent() {
             lessonCount: teacherLessons.length,
             recentThirtyDaysLessonCount,
             totalMinutes,
-            recentLessonDate: sortedLessons[0]?.lesson_date || null,
             recentFourWeeksCount: getRecentFourWeeksCount(teacherLessons),
           };
         }
@@ -422,6 +437,7 @@ function AdminTeachersContent() {
         const searchableText = [
           teacher.name,
           teacher.email || "",
+          getSubjectLabel(teacher.subject),
           teacher.classNames.join(" "),
           teacher.classDescriptions.join(" "),
           getTeacherStatusLabel(teacher.status),
@@ -471,10 +487,6 @@ function AdminTeachersContent() {
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               小老师查询
             </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              本页面只用于查看小老师、负责班级、学生数量和课程记录统计。小老师封存、恢复、密码重置、班级关系调整等维护操作统一放到维护中心处理。
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -519,7 +531,7 @@ function AdminTeachersContent() {
             </p>
 
             <p className="mt-1 text-xs text-stone-500">
-              状态异常或未分配班级
+              状态异常、缺少学科或未分配班级
             </p>
           </div>
 
@@ -554,10 +566,6 @@ function AdminTeachersContent() {
               <h2 className="text-xl font-bold text-emerald-950">
                 小老师列表
               </h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                默认显示当前且已分配班级的小老师。待维护包含状态异常，或者当前账号存在但尚未分配班级的小老师。
-              </p>
             </div>
 
             <div className="flex flex-col gap-2 md:flex-row md:items-center">
@@ -581,7 +589,7 @@ function AdminTeachersContent() {
               <input
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
-                placeholder="搜索小老师、班级、邮箱..."
+                placeholder="搜索小老师、学科、班级、邮箱..."
                 className="w-full rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none transition focus:border-emerald-500 focus:bg-white md:w-80"
               />
             </div>
@@ -597,16 +605,16 @@ function AdminTeachersContent() {
             </p>
           ) : (
             <div className="mt-6 overflow-x-auto rounded-2xl border border-emerald-100">
-              <table className="w-full min-w-[1050px] border-collapse bg-white text-left text-sm">
+              <table className="w-full min-w-[1040px] border-collapse bg-white text-left text-sm">
                 <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
                   <tr>
                     <th className="px-4 py-3 font-semibold">小老师</th>
+                    <th className="px-4 py-3 font-semibold">学科</th>
                     <th className="px-4 py-3 font-semibold">负责班级</th>
                     <th className="px-4 py-3 font-semibold">学生</th>
                     <th className="px-4 py-3 font-semibold">近 30 天</th>
                     <th className="px-4 py-3 font-semibold">近 4 周</th>
                     <th className="px-4 py-3 font-semibold">全部课程</th>
-                    <th className="px-4 py-3 font-semibold">最近上课</th>
                     <th className="px-4 py-3 font-semibold">关注状态</th>
                     <th className="px-4 py-3 font-semibold">状态</th>
                     <th className="px-4 py-3 font-semibold">详情</th>
@@ -627,6 +635,16 @@ function AdminTeachersContent() {
                           <p className="mt-1 text-xs text-stone-500">
                             {teacher.email || "暂未填写邮箱"}
                           </p>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
+                              teacher.subject
+                            )}`}
+                          >
+                            {getSubjectLabel(teacher.subject)}
+                          </span>
                         </td>
 
                         <td className="px-4 py-4">
@@ -663,9 +681,7 @@ function AdminTeachersContent() {
                             {teacher.recentThirtyDaysLessonCount}
                           </p>
 
-                          <p className="mt-1 text-xs text-stone-500">
-                            次课程
-                          </p>
+                          <p className="mt-1 text-xs text-stone-500">次课程</p>
                         </td>
 
                         <td className="px-4 py-4">
@@ -685,12 +701,6 @@ function AdminTeachersContent() {
 
                           <p className="mt-1 text-xs text-stone-500">
                             {formatHours(teacher.totalMinutes)} 小时
-                          </p>
-                        </td>
-
-                        <td className="px-4 py-4">
-                          <p className="text-sm text-stone-700">
-                            {teacher.recentLessonDate || "暂无记录"}
                           </p>
                         </td>
 

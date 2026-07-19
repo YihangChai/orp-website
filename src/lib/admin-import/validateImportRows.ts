@@ -3,12 +3,18 @@ import type {
   ImportValidationError,
   ParsedImportRow,
   PreviewImportRow,
+  SubjectCode,
 } from "./types";
 
 type ImportRowForValidation =
   | ParsedImportRow
   | PreviewImportRow
   | ExecutionImportRow;
+
+type TeacherSubjectCheck = {
+  rowNumber: number;
+  subject: SubjectCode | "";
+};
 
 function safeText(value: unknown) {
   if (typeof value === "string") return value.trim();
@@ -20,6 +26,10 @@ function getRowNumber(row: ImportRowForValidation) {
   return Number(row.rowNumber || row.lineNumber || 0);
 }
 
+/**
+ * Preview/Parsed 阶段是一行一个班级，有 studentNames 数组。
+ * Execution 阶段是一行一个学生，有 studentName。
+ */
 function getStudentNames(row: ImportRowForValidation) {
   const possibleExecutionRow = row as Partial<ExecutionImportRow>;
 
@@ -36,9 +46,24 @@ function getStudentNames(row: ImportRowForValidation) {
   return [];
 }
 
+function isExecutionRow(row: ImportRowForValidation) {
+  const possibleExecutionRow = row as Partial<ExecutionImportRow>;
+
+  return Boolean(
+    safeText(possibleExecutionRow.studentName) ||
+      safeText(possibleExecutionRow.studentUsername) ||
+      safeText(possibleExecutionRow.studentAuthEmail)
+  );
+}
+
 function isValidTeacherEmailSuffix(value: unknown) {
   const suffix = safeText(value);
   return /^\d{2,3}$/.test(suffix);
+}
+
+function isValidSubject(value: unknown): value is SubjectCode {
+  const subject = safeText(value);
+  return subject === "english" || subject === "math";
 }
 
 function normalizeClassKey(params: { cohortName: string; className: string }) {
@@ -50,6 +75,12 @@ function normalizeClassKey(params: { cohortName: string; className: string }) {
 
 function normalizeStudentName(name: unknown) {
   return safeText(name).replace(/\s+/g, "");
+}
+
+function getSubjectLabel(subject: SubjectCode | "") {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "未设置";
 }
 
 function pushError(
@@ -71,8 +102,14 @@ export function validateImportRows(
   rows: ImportRowForValidation[]
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];
+
   const classKeys = new Map<string, number>();
-  const teacherEmailKeys = new Map<string, number>();
+
+  /**
+   * 同一个老师可以出现在多行，但只能对应一个学科。
+   * 这里按 teacherEmail 判断，比按姓名更可靠。
+   */
+  const teacherSubjectByEmail = new Map<string, TeacherSubjectCheck>();
 
   rows.forEach((row) => {
     const rowNumber = getRowNumber(row);
@@ -80,9 +117,11 @@ export function validateImportRows(
     const cohortName = safeText(row.cohortName);
     const className = safeText(row.className);
     const school = safeText(row.school);
+    const subject = safeText(row.subject);
     const teacherName = safeText(row.teacherName);
     const teacherEnteringYear = safeText(row.teacherEnteringYear);
     const studentNames = getStudentNames(row);
+    const currentRowIsExecutionRow = isExecutionRow(row);
 
     if (!cohortName) {
       pushError(errors, {
@@ -105,6 +144,20 @@ export function validateImportRows(
         rowNumber,
         field: "school",
         message: "缺少合作学校。",
+      });
+    }
+
+    if (!subject) {
+      pushError(errors, {
+        rowNumber,
+        field: "subject",
+        message: "缺少学科，请填写“英语”或“数学”。",
+      });
+    } else if (!isValidSubject(subject)) {
+      pushError(errors, {
+        rowNumber,
+        field: "subject",
+        message: "学科格式不合法，请填写“英语”或“数学”。",
       });
     }
 
@@ -140,6 +193,10 @@ export function validateImportRows(
       });
     }
 
+    /**
+     * 同一个班级内部不能重复写同一个学生。
+     * 学生跨班重复是允许的，比如同时在英语班和数学班。
+     */
     const seenStudentsInThisClass = new Set<string>();
 
     studentNames.forEach((studentName) => {
@@ -160,7 +217,11 @@ export function validateImportRows(
       seenStudentsInThisClass.add(normalizedStudentName);
     });
 
-    if (cohortName && className) {
+    /**
+     * 只有 Parsed/Preview 阶段校验班级重复。
+     * Execution 阶段已经是一行一个学生，同一个班级会自然出现多次。
+     */
+    if (!currentRowIsExecutionRow && cohortName && className) {
       const classKey = normalizeClassKey({
         cohortName,
         className,
@@ -180,20 +241,28 @@ export function validateImportRows(
     }
 
     const possiblePreviewRow = row as Partial<PreviewImportRow>;
-
     const teacherEmail = safeText(possiblePreviewRow.teacherEmail).toLowerCase();
 
-    if (teacherEmail) {
-      if (teacherEmailKeys.has(teacherEmail)) {
+    if (teacherEmail && isValidSubject(subject)) {
+      const existingTeacherSubject = teacherSubjectByEmail.get(teacherEmail);
+
+      if (!existingTeacherSubject) {
+        teacherSubjectByEmail.set(teacherEmail, {
+          rowNumber,
+          subject,
+        });
+      } else if (existingTeacherSubject.subject !== subject) {
         pushError(errors, {
           rowNumber,
           field: "teacherEmail",
-          message: `小老师邮箱「${teacherEmail}」重复。第一次出现于第 ${teacherEmailKeys.get(
-            teacherEmail
-          )} 行。`,
+          message: `小老师邮箱「${teacherEmail}」在本次导入中同时对应「${getSubjectLabel(
+            existingTeacherSubject.subject
+          )}」和「${getSubjectLabel(
+            subject
+          )}」。一个小老师只能对应一个学科。第一次出现于第 ${
+            existingTeacherSubject.rowNumber
+          } 行。`,
         });
-      } else {
-        teacherEmailKeys.set(teacherEmail, rowNumber);
       }
     }
   });

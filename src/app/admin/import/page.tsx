@@ -12,16 +12,38 @@ import type {
   BulkImportReuseCandidate,
   ImportValidationError,
   PreviewImportRow,
+  SubjectCode,
 } from "@/lib/admin-import/types";
 
-const sampleText = `届别	班级名称	合作学校	小老师姓名	小老师邮箱后缀	学生名单	学生年级
-2025-2026	秋叶班	河北某小学	柴一航	24	小明、小红、小刚	四年级
-2025-2026	小溪班	河北某小学	薛喆天	24	小亮、小雨	五年级`;
+const sampleText = `届别	班级名称	合作学校	学科	小老师姓名	小老师邮箱后缀	学生名单	学生年级
+2025-2026	秋叶班	河北某小学	英语	柴一航	24	小明、小红、小刚	四年级
+2025-2026	小溪班	河北某小学	数学	薛喆天	24	小亮、小雨	五年级`;
 
 function safeText(value: unknown) {
   if (typeof value === "string") return value.trim();
   if (value === null || value === undefined) return "";
   return String(value).trim();
+}
+
+/**
+ * 数据库存 english/math，页面统一显示中文。
+ */
+function getSubjectLabel(subject: string | null | undefined) {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "未设置";
+}
+
+function getSubjectBadgeClass(subject: string | null | undefined) {
+  if (subject === "english") {
+    return "bg-sky-50 text-sky-700";
+  }
+
+  if (subject === "math") {
+    return "bg-violet-50 text-violet-700";
+  }
+
+  return "bg-stone-100 text-stone-600";
 }
 
 export default function AdminImportPage() {
@@ -145,6 +167,12 @@ function AdminImportContent() {
     );
   }, [rows]);
 
+  const subjectNames = useMemo(() => {
+    return Array.from(
+      new Set(rows.map((row) => getSubjectLabel(row.subject)).filter(Boolean))
+    );
+  }, [rows]);
+
   const canConfirmImport =
     hasParsed &&
     rows.length > 0 &&
@@ -152,30 +180,28 @@ function AdminImportContent() {
     !parseError &&
     importText.trim().length > 0;
 
-  function handleUseSample() {
-    setImportText(sampleText);
-    setHasParsed(false);
+  function resetImportState() {
     setMessage("");
     setImportResult(null);
     setReuseCandidates([]);
     setIsPreviewOpen(true);
+  }
+
+  function handleUseSample() {
+    setImportText(sampleText);
+    setHasParsed(false);
+    resetImportState();
   }
 
   function handleClear() {
     setImportText("");
     setHasParsed(false);
-    setMessage("");
-    setImportResult(null);
-    setReuseCandidates([]);
-    setIsPreviewOpen(true);
+    resetImportState();
   }
 
   function handlePreview() {
     setHasParsed(true);
-    setMessage("");
-    setImportResult(null);
-    setReuseCandidates([]);
-    setIsPreviewOpen(true);
+    resetImportState();
   }
 
   async function submitBulkImport(allowReuseArchived: boolean) {
@@ -251,7 +277,7 @@ function AdminImportContent() {
     }
 
     const confirmed = window.confirm(
-      `确认正式导入吗？\n\n当前预计导入：\n班级 ${classCount} 个\n小老师 ${teacherCount} 位\n不重复学生 ${uniqueStudentCount} 名\n班级学生席位 ${studentSeatCount} 个\n\n创建班级属于正常开班流程，不需要多管理员确认。\n系统会直接创建新账号、生成初始密码，并绑定班级关系。如果发现已封存账号，系统会先要求你确认是否复用。`
+      `确认正式导入吗？\n\n当前预计导入：\n班级 ${classCount} 个\n学科 ${subjectNames.join("、") || "未设置"}\n小老师 ${teacherCount} 位\n不重复学生 ${uniqueStudentCount} 名\n班级学生席位 ${studentSeatCount} 个\n\n创建班级属于正常开班流程，不需要多管理员确认。\n系统会直接创建新账号、生成初始密码，并绑定班级关系。如果发现已封存账号，系统会先要求你确认是否复用。`
     );
 
     if (!confirmed) return;
@@ -326,9 +352,9 @@ function AdminImportContent() {
                 从 Excel 或 Google Sheets 复制表格后粘贴到这里。推荐列顺序：
                 <span className="font-semibold text-emerald-800">
                   {" "}
-                  届别、班级名称、合作学校、小老师姓名、小老师邮箱后缀、学生名单、学生年级
+                  届别、班级名称、合作学校、学科、小老师姓名、小老师邮箱后缀、学生名单、学生年级
                 </span>
-                。学生名单可以用顿号、逗号、分号或斜杠分隔。系统会自动根据老师和学生姓名生成邮箱前缀、学生用户名和登录邮箱。
+                。学科请填写“英语”或“数学”。系统存储时会保存为 english / math，页面显示为中文。
               </p>
             </div>
 
@@ -365,6 +391,15 @@ function AdminImportContent() {
 
               <div className="mt-2 space-y-2">
                 <p>
+                  学科会写入班级和老师：
+                  <span className="font-semibold text-emerald-800">
+                    {" "}
+                    英语 → english，数学 → math
+                  </span>
+                  。学生不单独存学科，学生学科由所在班级推导。
+                </p>
+
+                <p>
                   小老师姓名 + 邮箱后缀 → 拼音 + 后缀 → 学校邮箱。
                   <span className="font-semibold text-emerald-800">
                     {" "}
@@ -381,7 +416,7 @@ function AdminImportContent() {
                 </p>
 
                 <p>
-                  班级创建属于正常开班流程。预览确认无误后会直接创建，不进入维护中心审批。
+                  如果系统发现 archived 账号，会先进入复用确认。后续可在封存账号回顾界面继续查看这些账号的处理记录。
                 </p>
               </div>
             </div>
@@ -432,6 +467,7 @@ function AdminImportContent() {
             uniqueStudentCount={uniqueStudentCount}
             studentSeatCount={studentSeatCount}
             cohortNames={cohortNames}
+            subjectNames={subjectNames}
             isPreviewOpen={isPreviewOpen}
             onTogglePreview={() => setIsPreviewOpen((prev) => !prev)}
           />
@@ -464,6 +500,7 @@ type ImportPreviewSectionProps = {
   uniqueStudentCount: number;
   studentSeatCount: number;
   cohortNames: string[];
+  subjectNames: string[];
   isPreviewOpen: boolean;
   onTogglePreview: () => void;
 };
@@ -477,6 +514,7 @@ function ImportPreviewSection({
   uniqueStudentCount,
   studentSeatCount,
   cohortNames,
+  subjectNames,
   isPreviewOpen,
   onTogglePreview,
 }: ImportPreviewSectionProps) {
@@ -487,7 +525,7 @@ function ImportPreviewSection({
           <h2 className="text-xl font-bold text-emerald-950">导入预览</h2>
 
           <p className="mt-2 text-sm leading-7 text-stone-600">
-            这里展示系统解析后的真实班级、小老师、学生名单和自动生成账号。正式导入前，请逐行确认，尤其注意重名学生、重名老师和班级名。
+            这里展示系统解析后的真实班级、学科、小老师、学生名单和自动生成账号。正式导入前，请逐行确认，尤其注意学科、重名学生、重名老师和班级名。
           </p>
         </div>
 
@@ -538,7 +576,7 @@ function ImportPreviewSection({
         </p>
       ) : (
         <>
-          <div className="mt-5 grid gap-3 sm:grid-cols-5">
+          <div className="mt-5 grid gap-3 sm:grid-cols-6">
             <div className="rounded-2xl bg-[#fffdf4] p-4">
               <p className="text-sm text-stone-500">届别</p>
 
@@ -548,6 +586,16 @@ function ImportPreviewSection({
 
               <p className="mt-1 text-xs leading-5 text-stone-500">
                 {cohortNames.join("、")}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-[#fffdf4] p-4">
+              <p className="text-sm text-stone-500">学科</p>
+              <p className="mt-1 text-3xl font-bold text-emerald-950">
+                {subjectNames.length}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-stone-500">
+                {subjectNames.join("、")}
               </p>
             </div>
 
@@ -587,13 +635,14 @@ function ImportPreviewSection({
             </p>
           ) : (
             <div className="mt-5 max-h-[560px] overflow-auto rounded-2xl border border-emerald-100">
-              <table className="w-full min-w-[1300px] border-collapse bg-white text-left text-sm">
+              <table className="w-full min-w-[1400px] border-collapse bg-white text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-[#fffdf4] text-stone-600">
                   <tr>
                     <th className="px-4 py-3 font-semibold">行号</th>
                     <th className="px-4 py-3 font-semibold">届别</th>
                     <th className="px-4 py-3 font-semibold">班级</th>
                     <th className="px-4 py-3 font-semibold">学校</th>
+                    <th className="px-4 py-3 font-semibold">学科</th>
                     <th className="px-4 py-3 font-semibold">小老师</th>
                     <th className="px-4 py-3 font-semibold">邮箱后缀</th>
                     <th className="px-4 py-3 font-semibold">老师邮箱</th>
@@ -623,6 +672,16 @@ function ImportPreviewSection({
 
                       <td className="px-4 py-3 align-top text-stone-700">
                         {row.school || "-"}
+                      </td>
+
+                      <td className="px-4 py-3 align-top">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectBadgeClass(
+                            row.subject
+                          )}`}
+                        >
+                          {getSubjectLabel(row.subject)}
+                        </span>
                       </td>
 
                       <td className="px-4 py-3 align-top text-stone-700">
@@ -703,7 +762,7 @@ function ArchivedReuseConfirmationPanel({
           <p className="mt-2 max-w-3xl text-sm leading-7 text-amber-800">
             系统发现导入名单中有账号以前已经存在，但当前状态是 archived。
             如果这些人是继续参加 ORP 的原成员，可以复用原账号并恢复为 active；
-            如果是重名或账号规则错误，请不要确认，先回到导入表修改。
+            如果是重名或账号规则错误，请不要确认，先回到导入表修改。这里的数据也为后续“封存账号回顾界面”预留。
           </p>
         </div>
 
@@ -718,13 +777,14 @@ function ArchivedReuseConfirmationPanel({
       </div>
 
       <div className="mt-5 overflow-x-auto rounded-2xl border border-amber-100 bg-white">
-        <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
           <thead className="bg-[#fffdf4] text-stone-600">
             <tr>
               <th className="px-4 py-3 font-semibold">行号</th>
               <th className="px-4 py-3 font-semibold">角色</th>
               <th className="px-4 py-3 font-semibold">姓名</th>
               <th className="px-4 py-3 font-semibold">登录账号</th>
+              <th className="px-4 py-3 font-semibold">学科</th>
               <th className="px-4 py-3 font-semibold">当前状态</th>
               <th className="px-4 py-3 font-semibold">将绑定到班级</th>
               <th className="px-4 py-3 font-semibold">说明</th>
@@ -753,6 +813,16 @@ function ArchivedReuseConfirmationPanel({
                   {candidate.loginAccount}
                 </td>
 
+                <td className="px-4 py-3">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectBadgeClass(
+                      candidate.subject
+                    )}`}
+                  >
+                    {getSubjectLabel(candidate.subject)}
+                  </span>
+                </td>
+
                 <td className="px-4 py-3 text-amber-800">
                   {candidate.currentStatus}
                 </td>
@@ -763,6 +833,11 @@ function ArchivedReuseConfirmationPanel({
 
                 <td className="px-4 py-3 text-stone-600">
                   {candidate.reason}
+                  {candidate.needsManualReview && (
+                    <span className="ml-2 rounded-full bg-red-50 px-2 py-1 text-xs font-semibold text-red-700">
+                      建议人工复核
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -799,7 +874,7 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
       "ORP 新账号初始密码清单",
       "说明：初始密码只在创建账号时显示一次，请妥善保存。",
       "",
-      "角色\t姓名\t登录账号\t初始密码\t班级",
+      "角色\t姓名\t登录账号\t初始密码\t班级\t学科",
       ...createdAccounts.map((account) =>
         [
           account.role === "teacher" ? "小老师" : "学生",
@@ -807,6 +882,7 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
           account.loginAccount,
           account.initialPassword,
           account.className,
+          getSubjectLabel(account.subject),
         ].join("\t")
       ),
     ];
@@ -922,6 +998,61 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
     );
   }
 
+  function AccountSummaryList({
+    title,
+    description,
+    accounts,
+    tone,
+  }: {
+    title: string;
+    description: string;
+    accounts: typeof result.accounts;
+    tone: "amber" | "stone" | "red";
+  }) {
+    const wrapperClass =
+      tone === "red"
+        ? "border-red-100 bg-red-50"
+        : tone === "amber"
+        ? "border-amber-100 bg-amber-50"
+        : "border-stone-100 bg-[#fffdf4]";
+
+    const titleClass =
+      tone === "red"
+        ? "text-red-700"
+        : tone === "amber"
+        ? "text-amber-900"
+        : "text-stone-800";
+
+    const textClass =
+      tone === "red"
+        ? "text-red-700"
+        : tone === "amber"
+        ? "text-amber-900"
+        : "text-stone-700";
+
+    return (
+      <div className={`mt-6 rounded-2xl border p-4 ${wrapperClass}`}>
+        <p className={`text-sm font-bold ${titleClass}`}>{title}</p>
+
+        <p className="mt-2 text-sm leading-7 text-stone-600">{description}</p>
+
+        <div className="mt-3 space-y-2">
+          {accounts.map((account, index) => (
+            <p
+              key={`${account.role}-${account.loginAccount}-${index}`}
+              className={`text-sm ${textClass}`}
+            >
+              {account.role === "teacher" ? "小老师" : "学生"}：
+              {account.name}（{account.loginAccount || "无账号"}）-
+              {account.className} - {getSubjectLabel(account.subject)}
+              {account.message ? `：${account.message}` : ""}
+            </p>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
       <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
@@ -981,7 +1112,7 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
           <ImportStatsBox />
 
           <div className="mt-4 overflow-x-auto rounded-2xl border border-amber-100 bg-white">
-            <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[980px] border-collapse text-left text-sm">
               <thead className="bg-[#fffdf4] text-stone-600">
                 <tr>
                   <th className="px-4 py-3 font-semibold">角色</th>
@@ -989,6 +1120,7 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
                   <th className="px-4 py-3 font-semibold">登录账号</th>
                   <th className="px-4 py-3 font-semibold">初始密码</th>
                   <th className="px-4 py-3 font-semibold">班级</th>
+                  <th className="px-4 py-3 font-semibold">学科</th>
                 </tr>
               </thead>
 
@@ -1017,6 +1149,16 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
                     <td className="px-4 py-3 text-stone-700">
                       {account.className}
                     </td>
+
+                    <td className="px-4 py-3">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectBadgeClass(
+                          account.subject
+                        )}`}
+                      >
+                        {getSubjectLabel(account.subject)}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1038,65 +1180,30 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
       )}
 
       {restoredAccounts.length > 0 && (
-        <div className="mt-6 rounded-2xl border border-amber-100 bg-amber-50 p-4">
-          <p className="text-sm font-bold text-amber-900">已恢复账号</p>
-
-          <p className="mt-2 text-sm leading-7 text-amber-800">
-            这些账号之前处于 archived 状态。本次导入时管理员已确认复用，系统已恢复为 active 并绑定到新班级。
-          </p>
-
-          <div className="mt-3 space-y-2">
-            {restoredAccounts.map((account, index) => (
-              <p
-                key={`${account.role}-${account.loginAccount}-${index}`}
-                className="text-sm text-amber-900"
-              >
-                {account.role === "teacher" ? "小老师" : "学生"}：
-                {account.name}（{account.loginAccount}）- {account.className}
-              </p>
-            ))}
-          </div>
-        </div>
+        <AccountSummaryList
+          title="已恢复账号"
+          description="这些账号之前处于 archived 状态。本次导入时管理员已确认复用，系统已恢复为 active 并绑定到新班级。"
+          accounts={restoredAccounts}
+          tone="amber"
+        />
       )}
 
       {existingAccounts.length > 0 && (
-        <div className="mt-6 rounded-2xl border border-stone-100 bg-[#fffdf4] p-4">
-          <p className="text-sm font-bold text-stone-800">已存在账号</p>
-
-          <p className="mt-2 text-sm leading-7 text-stone-600">
-            这些账号之前已经创建过，系统复用了已有账号，不会显示原密码。
-          </p>
-
-          <div className="mt-3 space-y-2">
-            {existingAccounts.map((account, index) => (
-              <p
-                key={`${account.role}-${account.loginAccount}-${index}`}
-                className="text-sm text-stone-700"
-              >
-                {account.role === "teacher" ? "小老师" : "学生"}：
-                {account.name}（{account.loginAccount}）- {account.className}
-              </p>
-            ))}
-          </div>
-        </div>
+        <AccountSummaryList
+          title="已存在账号"
+          description="这些账号之前已经创建过，系统复用了已有账号，不会显示原密码。"
+          accounts={existingAccounts}
+          tone="stone"
+        />
       )}
 
       {failedAccounts.length > 0 && (
-        <div className="mt-6 rounded-2xl border border-red-100 bg-red-50 p-4">
-          <p className="text-sm font-bold text-red-700">失败项目</p>
-
-          <div className="mt-3 space-y-2">
-            {failedAccounts.map((account, index) => (
-              <p
-                key={`${account.role}-${account.loginAccount}-${index}`}
-                className="text-sm text-red-700"
-              >
-                {account.name}（{account.loginAccount || "无账号"}）：
-                {account.message || "导入失败。"}
-              </p>
-            ))}
-          </div>
-        </div>
+        <AccountSummaryList
+          title="失败项目"
+          description="这些项目没有成功导入，请根据错误信息修正数据后重新导入。"
+          accounts={failedAccounts}
+          tone="red"
+        />
       )}
     </section>
   );

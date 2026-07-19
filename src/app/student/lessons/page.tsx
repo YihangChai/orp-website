@@ -7,6 +7,10 @@ import { supabase } from "@/lib/supabaseClient";
 import StudentGuard, { useCurrentStudent } from "@/components/StudentGuard";
 import type { CurrentStudent } from "@/lib/auth";
 
+const STUDENT_ARCHIVED_REVIEW_PATH = "/student/archive-review";
+
+type StudentAccessState = "active" | "withdrawn" | "archived" | "unavailable";
+
 type StudentRow = {
   id: string;
   name: string;
@@ -64,8 +68,9 @@ type StudentLessonComment = {
 
 type StudentLessonsPageData = {
   student: StudentRow;
+  accessState: StudentAccessState;
   classRelations: ClassRelation[];
-  selectedClassRelation: ClassRelation;
+  selectedClassRelation: ClassRelation | null;
   selectedClassId: string;
   records: LessonRecord[];
   attendanceRecords: AttendanceRecord[];
@@ -76,6 +81,15 @@ function getSubjectLabel(subject: string | null | undefined) {
   if (subject === "english") return "英语";
   if (subject === "math") return "数学";
   return "暂未设置";
+}
+
+function getStudentAccessState(
+  status: string | null | undefined
+): StudentAccessState {
+  if (status === "active") return "active";
+  if (status === "withdrawn") return "withdrawn";
+  if (status === "archived") return "archived";
+  return "unavailable";
 }
 
 function buildStudentClassLink(path: string, classId: string | null) {
@@ -126,11 +140,27 @@ function StudentLessonsContent() {
     }
 
     const studentData = studentFromSupabase as StudentRow;
+    const accessState = getStudentAccessState(studentData.status);
 
-    if (
-      studentData.status === "withdrawn" ||
-      studentData.status === "archived"
-    ) {
+    /**
+     * archived 学生预留逻辑：
+     * - 目前不进入普通课程记录页，不允许继续留言。
+     * - 后续可以在 /student/archive-review 读取历史班级和历史课程。
+     */
+    if (accessState === "archived") {
+      return {
+        student: studentData,
+        accessState,
+        classRelations: [],
+        selectedClassRelation: null,
+        selectedClassId: "",
+        records: [],
+        attendanceRecords: [],
+        comments: [],
+      };
+    }
+
+    if (accessState !== "active") {
       throw new Error("这个学生账号当前不可用。如有疑问，请联系 ORP 管理员。");
     }
 
@@ -179,7 +209,9 @@ function StudentLessonsContent() {
     }
 
     const requestedRelation = requestedClassId
-      ? activeRelations.find((relation) => relation.class_id === requestedClassId)
+      ? activeRelations.find(
+          (relation) => relation.class_id === requestedClassId
+        )
       : null;
 
     const selectedRelation = requestedRelation || activeRelations[0];
@@ -204,6 +236,7 @@ function StudentLessonsContent() {
     if (lessonRecordIds.length === 0) {
       return {
         student: studentData,
+        accessState,
         classRelations: activeRelations,
         selectedClassRelation: selectedRelation,
         selectedClassId: activeClassId,
@@ -240,6 +273,7 @@ function StudentLessonsContent() {
 
     return {
       student: studentData,
+      accessState,
       classRelations: activeRelations,
       selectedClassRelation: selectedRelation,
       selectedClassId: activeClassId,
@@ -274,7 +308,10 @@ function StudentLessonsContent() {
 
         setPageData(loadedPageData);
 
-        if (selectedClassId !== loadedPageData.selectedClassId) {
+        if (
+          loadedPageData.accessState === "active" &&
+          selectedClassId !== loadedPageData.selectedClassId
+        ) {
           setSelectedClassId(loadedPageData.selectedClassId);
         }
       } catch (error) {
@@ -329,8 +366,8 @@ function StudentLessonsContent() {
   }
 
   async function submitComment(lessonId: string) {
-    if (!pageData) {
-      setMessage("课程数据尚未加载完成，请稍后再试。");
+    if (!pageData || pageData.accessState !== "active") {
+      setMessage("当前账号不能提交留言。");
       return;
     }
 
@@ -399,9 +436,49 @@ function StudentLessonsContent() {
     );
   }
 
+  if (pageData?.accessState === "archived") {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-5xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-8">
+          <p className="text-sm font-semibold text-[#2f5d50]">
+            ORP 历史课程记录
+          </p>
+
+          <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+            {pageData.student.name} 的历史学习回顾
+          </h1>
+
+          <p className="mt-4 text-sm leading-7 text-stone-600">
+            你的账号目前已经归档。之后这里会开放历史课程记录回顾，用来查看你曾经上过的课程、学习内容和留言。
+          </p>
+
+          <div className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
+            当前版本先保留这个入口。正式开放后，归档学生可以进入专门的历史学习回顾页面，而不是继续使用当前班级课程页。
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Link
+              href={STUDENT_ARCHIVED_REVIEW_PATH}
+              className="rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
+            >
+              查看历史学习回顾
+            </Link>
+
+            <Link
+              href="/student"
+              className="rounded-full border border-emerald-700 px-5 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+            >
+              返回学习空间
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   const studentName = pageData?.student.name || currentStudent.name;
   const records = pageData?.records || [];
-  const selectedClass = pageData?.selectedClassRelation.classes || null;
+  const selectedClass = pageData?.selectedClassRelation?.classes || null;
   const currentClassId = pageData?.selectedClassId || selectedClassId || "";
   const currentClassName = selectedClass?.name || "当前班级";
   const currentSubjectName = getSubjectLabel(selectedClass?.subject);

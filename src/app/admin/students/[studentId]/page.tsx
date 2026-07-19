@@ -6,6 +6,18 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import AdminGuard from "@/components/AdminGuard";
 
+/**
+ * admin/students/[studentId] 页面原则：
+ * 1. AdminGuard 负责确认管理员身份。
+ * 2. 本页面只读单个学生的历史档案，不做维护操作。
+ * 3. 学生账号状态、班级调整、密码重置统一放到维护中心。
+ *
+ * 学科规则：
+ * - students 不存 subject。
+ * - 学生学科由 class_students -> classes.subject 推导。
+ * - 一个学生可以同时属于英语班和数学班。
+ */
+
 type StudentRecord = {
   id: string;
   name: string;
@@ -64,6 +76,16 @@ type StudentComment = {
   created_at: string;
 };
 
+type StudentClassSummary = {
+  classId: string;
+  className: string;
+  subject: string | null;
+  school: string | null;
+  cohortName: string;
+  status: string | null;
+  teacherNames: string[];
+};
+
 type StudentDetailData = {
   student: StudentRecord;
   classRelations: ClassRelation[];
@@ -85,6 +107,22 @@ function getMany<T>(value: T | T[] | null | undefined): T[] {
   return [value];
 }
 
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function getSubjectLabel(subject: string | null | undefined) {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "未设置";
+}
+
+function getSubjectClassName(subject: string | null | undefined) {
+  if (subject === "english") return "bg-sky-50 text-sky-700";
+  if (subject === "math") return "bg-violet-50 text-violet-700";
+  return "bg-stone-100 text-stone-500";
+}
+
 function getStudentStatusLabel(status: string) {
   if (status === "active") return "当前";
   if (status === "withdrawn") return "已退出";
@@ -99,10 +137,6 @@ function getStudentStatusClassName(status: string) {
   if (status === "archived") return "bg-stone-100 text-stone-500";
   if (status === "delete_requested") return "bg-red-50 text-red-700";
   return "bg-stone-100 text-stone-500";
-}
-
-function isCurrentStudent(status: string, classCount: number) {
-  return status === "active" && classCount > 0;
 }
 
 function isMaintenanceStudent(status: string, classCount: number) {
@@ -142,6 +176,21 @@ function getGoalStatusClassName(status: string | null) {
   if (status === "completed") return "bg-blue-50 text-blue-700";
   if (status === "archived") return "bg-stone-100 text-stone-500";
   return "bg-stone-100 text-stone-500";
+}
+
+function getClassStatusLabel(status: string | null | undefined) {
+  if (status === "active") return "运行中";
+  if (status === "archived") return "已封存";
+  if (status === "completed") return "已完成";
+  return "未知状态";
+}
+
+function getClassStatusClassName(status: string | null | undefined) {
+  if (status === "active") return "bg-emerald-50 text-emerald-700";
+  if (status === "archived" || status === "completed") {
+    return "bg-stone-100 text-stone-500";
+  }
+  return "bg-amber-50 text-amber-700";
 }
 
 function isWithinRecentThirtyDays(dateString: string) {
@@ -194,7 +243,8 @@ function getAttentionLabel({
     return {
       text: "待维护：状态异常",
       className: "bg-red-50 text-red-700",
-      description: "这个学生的状态不是 active / withdrawn / archived，需要在维护中心检查。",
+      description:
+        "这个学生的状态不是 active / withdrawn / archived，需要在维护中心检查。",
     };
   }
 
@@ -202,7 +252,8 @@ function getAttentionLabel({
     return {
       text: "待维护：未绑定班级",
       className: "bg-red-50 text-red-700",
-      description: "这个学生账号存在，但没有绑定任何班级，需要在维护中心重新加入班级或处理异常数据。",
+      description:
+        "这个学生账号存在，但没有绑定任何班级，需要在维护中心重新加入班级或处理异常数据。",
     };
   }
 
@@ -210,7 +261,8 @@ function getAttentionLabel({
     return {
       text: "缺少出勤记录",
       className: "bg-amber-50 text-amber-700",
-      description: "班级已有课程记录，但这个学生没有对应出勤记录，需要检查课程记录是否完整。",
+      description:
+        "班级已有课程记录，但这个学生没有对应出勤记录，需要检查课程记录是否完整。",
     };
   }
 
@@ -281,7 +333,9 @@ function StudentDetailContent() {
       }
 
       if (!studentData) {
-        throw new Error("没有找到这个学生。可能这个学生已经被删除，或者链接里的 ID 不正确。");
+        throw new Error(
+          "没有找到这个学生。可能这个学生已经被删除，或者链接里的 ID 不正确。"
+        );
       }
 
       const student = studentData as StudentRecord;
@@ -296,6 +350,7 @@ function StudentDetailContent() {
               id,
               name,
               school,
+              subject,
               status,
               cohort_id,
               cohorts (
@@ -308,6 +363,7 @@ function StudentDetailContent() {
                   id,
                   name,
                   email,
+                  subject,
                   status
                 )
               )
@@ -370,9 +426,9 @@ function StudentDetailContent() {
         throw new Error(`读取出勤记录失败：${attendanceError.message}`);
       }
 
-      const attendanceRecords = ((attendanceData || []) as AttendanceRecord[]).filter(
-        (attendance) => lessonIds.has(attendance.lesson_record_id)
-      );
+      const attendanceRecords = (
+        (attendanceData || []) as AttendanceRecord[]
+      ).filter((attendance) => lessonIds.has(attendance.lesson_record_id));
 
       const { data: commentData, error: commentError } = await supabase
         .from("student_lesson_comments")
@@ -395,9 +451,7 @@ function StudentDetailContent() {
         studentComments: (commentData || []) as StudentComment[],
       });
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "读取学生详情失败。"
-      );
+      setMessage(error instanceof Error ? error.message : "读取学生详情失败。");
     } finally {
       setIsLoading(false);
     }
@@ -407,6 +461,7 @@ function StudentDetailContent() {
     if (studentId) {
       fetchStudentDetail();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentId]);
 
   const computed = useMemo(() => {
@@ -428,6 +483,40 @@ function StudentDetailContent() {
     attendanceRecords.forEach((attendance) => {
       attendanceByLessonId.set(attendance.lesson_record_id, attendance);
     });
+
+    const classSummaries: StudentClassSummary[] = classRelations.map(
+      (relation) => {
+        const classItem = relation.classes;
+        const cohort = getOne(classItem?.cohorts);
+        const teachers = getMany(classItem?.class_teachers);
+
+        const teacherNames = uniqueStrings(
+          teachers
+            .map((teacherRelation: any) => teacherRelation.teachers?.name)
+            .filter(Boolean)
+        );
+
+        return {
+          classId: relation.class_id,
+          className: classItem?.name || "未知班级",
+          subject: classItem?.subject || null,
+          school: classItem?.school || null,
+          cohortName: cohort?.name || "未设置届别",
+          status: classItem?.status || null,
+          teacherNames,
+        };
+      }
+    );
+
+    const subjects = uniqueStrings(
+      classSummaries
+        .map((classSummary) => classSummary.subject || "")
+        .filter(Boolean)
+    );
+
+    const teacherNames = uniqueStrings(
+      classSummaries.flatMap((classSummary) => classSummary.teacherNames)
+    );
 
     const totalMinutes = lessonRecords.reduce(
       (sum, lesson) => sum + (lesson.duration_minutes || 0),
@@ -458,19 +547,6 @@ function StudentDetailContent() {
       presentCount,
     });
 
-    const teacherNames = Array.from(
-      new Set(
-        classRelations.flatMap((relation) => {
-          const classItem = relation.classes;
-          const classTeachers = getMany(classItem?.class_teachers);
-
-          return classTeachers
-            .map((item: any) => item.teachers?.name)
-            .filter(Boolean);
-        })
-      )
-    );
-
     const goalById = new Map<string, TeachingGoal>();
 
     teachingGoals.forEach((goal) => {
@@ -479,16 +555,16 @@ function StudentDetailContent() {
 
     const classNameById = new Map<string, string>();
 
-    classRelations.forEach((relation) => {
-      classNameById.set(
-        relation.class_id,
-        relation.classes?.name || "未知班级"
-      );
+    classSummaries.forEach((classSummary) => {
+      classNameById.set(classSummary.classId, classSummary.className);
     });
 
     return {
       studentStatus,
       attendanceByLessonId,
+      classSummaries,
+      subjects,
+      teacherNames,
       totalMinutes,
       recentThirtyDaysLessonCount,
       presentCount,
@@ -496,7 +572,6 @@ function StudentDetailContent() {
       attendanceCount,
       attendanceRate,
       attention,
-      teacherNames,
       goalById,
       classNameById,
       shouldShowMaintenanceNotice: isMaintenanceStudent(
@@ -544,7 +619,6 @@ function StudentDetailContent() {
 
   const {
     student,
-    classRelations,
     teachingGoals,
     lessonRecords,
     studentComments,
@@ -553,6 +627,9 @@ function StudentDetailContent() {
   const {
     studentStatus,
     attendanceByLessonId,
+    classSummaries,
+    subjects,
+    teacherNames,
     totalMinutes,
     recentThirtyDaysLessonCount,
     presentCount,
@@ -560,7 +637,6 @@ function StudentDetailContent() {
     attendanceCount,
     attendanceRate,
     attention,
-    teacherNames,
     goalById,
     classNameById,
     shouldShowMaintenanceNotice,
@@ -597,10 +673,6 @@ function StudentDetailContent() {
                 {attention.text}
               </span>
             </div>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              本页用于查看单个学生的完整历史档案，包括所属班级、学习目标、全部课程记录、出勤和反馈。维护操作统一去维护中心处理。
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -634,7 +706,30 @@ function StudentDetailContent() {
           </section>
         )}
 
-        <section className="grid gap-4 md:grid-cols-4">
+        <section className="grid gap-4 md:grid-cols-5">
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+            <p className="text-sm text-stone-500">学科</p>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {subjects.length === 0 ? (
+                <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-500">
+                  未设置
+                </span>
+              ) : (
+                subjects.map((subject) => (
+                  <span
+                    key={subject}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
+                      subject
+                    )}`}
+                  >
+                    {getSubjectLabel(subject)}
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
             <p className="text-sm text-stone-500">学习目标</p>
 
@@ -730,75 +825,63 @@ function StudentDetailContent() {
           <div className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
             <h2 className="text-xl font-bold text-emerald-950">所属班级</h2>
 
-            {classRelations.length === 0 ? (
+            {classSummaries.length === 0 ? (
               <p className="mt-5 rounded-2xl bg-red-50 p-5 text-sm leading-7 text-red-700">
                 这个学生暂时没有绑定任何班级。正常情况下，学生应该通过分班导入或维护中心加入班级。
               </p>
             ) : (
               <div className="mt-5 space-y-3">
-                {classRelations.map((relation) => {
-                  const classItem = relation.classes;
-                  const cohort = getOne(classItem?.cohorts);
-                  const teachers = getMany(classItem?.class_teachers);
-
-                  const isClassArchived =
-                    classItem?.status === "archived" ||
-                    classItem?.status === "completed";
-
-                  return (
-                    <div
-                      key={relation.class_id}
-                      className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4"
-                    >
-                      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                        <div>
+                {classSummaries.map((classSummary) => (
+                  <div
+                    key={classSummary.classId}
+                    className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4"
+                  >
+                    <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-bold text-emerald-950">
-                            {classItem?.name || "未知班级"}
+                            {classSummary.className}
                           </h3>
 
-                          <p className="mt-1 text-sm text-stone-600">
-                            {cohort?.name || "未设置届别"} ·{" "}
-                            {classItem?.school || "未填写学校"}
-                          </p>
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${getSubjectClassName(
+                              classSummary.subject
+                            )}`}
+                          >
+                            {getSubjectLabel(classSummary.subject)}
+                          </span>
                         </div>
 
-                        <span
-                          className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${
-                            isClassArchived
-                              ? "bg-stone-100 text-stone-500"
-                              : "bg-emerald-50 text-emerald-700"
-                          }`}
-                        >
-                          {isClassArchived ? "已封存" : "运行中"}
-                        </span>
+                        <p className="mt-1 text-sm text-stone-600">
+                          {classSummary.cohortName} ·{" "}
+                          {classSummary.school || "未填写学校"}
+                        </p>
+
+                        <p className="mt-2 text-xs text-stone-500">
+                          小老师：
+                          {classSummary.teacherNames.length > 0
+                            ? classSummary.teacherNames.join("、")
+                            : "暂无"}
+                        </p>
                       </div>
 
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {teachers.length > 0 ? (
-                          teachers.map((teacherRelation: any) => (
-                            <span
-                              key={teacherRelation.teachers?.id}
-                              className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-stone-600"
-                            >
-                              {teacherRelation.teachers?.name || "未知老师"}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-sm text-stone-400">
-                            暂无小老师
-                          </span>
-                        )}
-                      </div>
-
-                      <Link
-                        href={`/admin/classes/${relation.class_id}`}
-                        className="mt-4 inline-block rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                      <span
+                        className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${getClassStatusClassName(
+                          classSummary.status
+                        )}`}
                       >
-                        查看班级详情
-                      </Link>
+                        {getClassStatusLabel(classSummary.status)}
+                      </span>
                     </div>
-                  );
-                })}
+
+                    <Link
+                      href={`/admin/classes/${classSummary.classId}`}
+                      className="mt-4 inline-block rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                    >
+                      查看班级详情
+                    </Link>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -808,10 +891,6 @@ function StudentDetailContent() {
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
             <div>
               <h2 className="text-xl font-bold text-emerald-950">学习目标</h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                这里显示该学生所属班级的完整学习目标。默认显示最近 3 个，点击按钮可展开全部。
-              </p>
             </div>
 
             {teachingGoals.length > 3 && (
@@ -896,13 +975,7 @@ function StudentDetailContent() {
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
             <div>
-              <h2 className="text-xl font-bold text-emerald-950">
-                课程记录
-              </h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                这里显示该学生所属班级的完整课程记录。默认显示最近 5 条，点击按钮可展开全部。
-              </p>
+              <h2 className="text-xl font-bold text-emerald-950">课程记录</h2>
             </div>
 
             {lessonRecords.length > 5 && (
@@ -1046,10 +1119,6 @@ function StudentDetailContent() {
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
             <div>
               <h2 className="text-xl font-bold text-emerald-950">学生反馈</h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                这里显示该学生提交过的课程反馈。默认显示最近 5 条，点击按钮可展开全部。
-              </p>
             </div>
 
             {studentComments.length > 5 && (

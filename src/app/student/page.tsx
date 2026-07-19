@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabaseClient";
 import StudentGuard, { useCurrentStudent } from "@/components/StudentGuard";
 import type { CurrentStudent } from "@/lib/auth";
 
+const STUDENT_ARCHIVED_REVIEW_PATH = "/student/archive-review";
+
 type StudentRow = {
   id: string;
   name: string;
@@ -79,10 +81,13 @@ type StudentLessonComment = {
   created_at: string;
 };
 
+type StudentAccessState = "active" | "withdrawn" | "archived" | "unavailable";
+
 type StudentHomePageData = {
   student: StudentRow;
+  accessState: StudentAccessState;
   classRelations: ClassRelation[];
-  selectedClassRelation: ClassRelation;
+  selectedClassRelation: ClassRelation | null;
   selectedClassId: string;
   classmates: StudentRow[];
   goals: TeachingGoal[];
@@ -99,6 +104,13 @@ function getSubjectLabel(subject: string | null | undefined) {
 function buildStudentClassLink(path: string, classId: string | null) {
   if (!classId) return path;
   return `${path}?classId=${encodeURIComponent(classId)}`;
+}
+
+function getStudentAccessState(status: string | null | undefined): StudentAccessState {
+  if (status === "active") return "active";
+  if (status === "withdrawn") return "withdrawn";
+  if (status === "archived") return "archived";
+  return "unavailable";
 }
 
 export default function StudentPage() {
@@ -136,11 +148,32 @@ function StudentHomeContent() {
     }
 
     const studentData = studentFromSupabase as StudentRow;
+    const accessState = getStudentAccessState(studentData.status);
 
-    if (
-      studentData.status === "withdrawn" ||
-      studentData.status === "archived"
-    ) {
+    /**
+     * 预留 archived 学生回顾入口：
+     * - active：进入正常学生首页
+     * - archived：不读取当前班级运营数据，改为显示历史回顾入口
+     * - withdrawn / unavailable：暂时不开放学生端
+     *
+     * 之后如果做 /student/archive-review，可以把 archived 学生的历史课程、
+     * 学习目标、留言等集中放到那个页面。
+     */
+    if (accessState === "archived") {
+      return {
+        student: studentData,
+        accessState,
+        classRelations: [],
+        selectedClassRelation: null,
+        selectedClassId: "",
+        classmates: [],
+        goals: [],
+        records: [],
+        latestRecordComments: [],
+      };
+    }
+
+    if (accessState !== "active") {
       throw new Error("这个学生账号当前不可用。如有疑问，请联系 ORP 管理员。");
     }
 
@@ -284,6 +317,7 @@ function StudentHomeContent() {
 
     return {
       student: studentData,
+      accessState,
       classRelations: activeClassRelations,
       selectedClassRelation: selectedRelation,
       selectedClassId: activeClassId,
@@ -311,7 +345,10 @@ function StudentHomeContent() {
 
         setPageData(loadedPageData);
 
-        if (selectedClassId !== loadedPageData.selectedClassId) {
+        if (
+          loadedPageData.accessState === "active" &&
+          selectedClassId !== loadedPageData.selectedClassId
+        ) {
           setSelectedClassId(loadedPageData.selectedClassId);
         }
       } catch (error) {
@@ -349,7 +386,7 @@ function StudentHomeContent() {
 
   const expectedLessons = currentGoal?.expected_lessons || 0;
 
-  const selectedClass = pageData?.selectedClassRelation.classes || null;
+  const selectedClass = pageData?.selectedClassRelation?.classes || null;
   const hasMultipleClasses = (pageData?.classRelations.length || 0) > 1;
 
   const teacherNames = useMemo(() => {
@@ -384,6 +421,37 @@ function StudentHomeContent() {
       <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
         <section className="mx-auto max-w-4xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm">
           <p className="text-sm text-stone-600">正在读取学生信息...</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (pageData?.accessState === "archived") {
+    return (
+      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
+        <section className="mx-auto max-w-4xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-8">
+          <p className="text-sm font-semibold text-[#2f5d50]">
+            ORP 历史学习档案
+          </p>
+
+          <h1 className="mt-2 text-3xl font-bold text-emerald-950">
+            你好，{pageData.student.name}
+          </h1>
+
+          <p className="mt-4 text-sm leading-7 text-stone-600">
+            你的账号目前已经归档。之后这里会开放一个历史学习回顾页面，用来查看你曾经参加过的班级、课程记录和学习反馈。
+          </p>
+
+          <div className="mt-6 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
+            当前版本先保留这个入口。正式开放后，归档学生会进入专门的历史学习回顾页面，而不是普通学生首页。
+          </div>
+
+          <Link
+            href={STUDENT_ARCHIVED_REVIEW_PATH}
+            className="mt-6 inline-block rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900"
+          >
+            查看历史学习回顾
+          </Link>
         </section>
       </main>
     );
@@ -549,7 +617,7 @@ function StudentHomeContent() {
               </h2>
 
               <p className="mt-1 text-sm text-stone-500">
-                当前班级：{studentInfo.className} · {studentInfo.subjectName}
+                查看你当前班级最近一次课程记录。
               </p>
             </div>
 

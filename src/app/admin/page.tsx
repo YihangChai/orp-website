@@ -744,10 +744,6 @@ function AdminHomeContent() {
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
               <div>
                 <h2 className="text-xl font-bold text-emerald-950">全站搜索</h2>
-
-                <p className="mt-2 text-sm leading-7 text-stone-600">
-                  搜索班级、学生、小老师、课程记录或留言。搜索不会在进入主页时预加载，只有点击搜索后才读取数据库。
-                </p>
               </div>
 
               {hasSearchTerm && (
@@ -783,34 +779,6 @@ function AdminHomeContent() {
                 {isSearching ? "搜索中..." : "搜索"}
               </button>
             </form>
-
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-stone-500">
-              <span>快速搜索类型：</span>
-
-              {["班级", "学生", "小老师", "课程记录", "留言"].map(
-                (exampleKeyword) => (
-                  <button
-                    key={exampleKeyword}
-                    type="button"
-                    onClick={() => {
-                      setSearchTerm(exampleKeyword);
-                      setSearchResults([]);
-                      setHasSearched(false);
-                      setSearchMessage("");
-                    }}
-                    className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 transition hover:bg-emerald-100"
-                  >
-                    {exampleKeyword}
-                  </button>
-                )
-              )}
-            </div>
-
-            {!hasSearched && (
-              <div className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-                输入关键词后点击搜索，系统才会读取相关数据。这样可以让管理员主页打开更快。
-              </div>
-            )}
 
             {searchMessage && (
               <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">

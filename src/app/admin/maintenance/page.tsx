@@ -570,10 +570,6 @@ function AdminMaintenanceContent() {
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               管理员维护中心
             </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              维护中心只显示运行中的班级。所有修改、移除、添加、删除/归档、密码重置操作都会先创建申请，需要所有 active 管理员确认后才会执行。
-            </p>
           </div>
 
           <Link
@@ -675,7 +671,7 @@ function AdminMaintenanceContent() {
             <h2 className="text-xl font-bold text-emerald-950">选择班级</h2>
 
             <p className="mt-2 text-sm leading-7 text-stone-600">
-              搜索运行中的班级、届别或合作学校。已封存班级不会出现在维护中心。
+              下滑或搜索
             </p>
 
             <input

@@ -12,12 +12,18 @@ import AdminGuard, { useCurrentAdmin } from "@/components/AdminGuard";
  * 3. 批量导入、账号创建、初始密码生成、老师学生绑定，统一放在 /admin/import。
  * 4. 班级基础信息修改、人员调整、删除/恢复等维护操作，统一放到后续的 /admin/maintenance。
  * 5. 本页面仅保留“整届封存”作为学年结束时的集中操作。
+ *
+ * 学科规则：
+ * - classes.subject 存储 english / math
+ * - 页面显示中文：英语 / 数学
+ * - 学生不单独存 subject，学生学科由 class_students -> classes.subject 推导
  */
 
 type ClassTableItem = {
   id: string;
   name: string;
   school: string | null;
+  subject: string | null;
   status: string;
   cohortName: string;
   cohortId: string | null;
@@ -56,6 +62,18 @@ function getStatusClassName(status: string) {
   if (status === "active") return "bg-emerald-50 text-emerald-700";
   if (status === "archived") return "bg-stone-100 text-stone-500";
   if (status === "delete_requested") return "bg-amber-50 text-amber-700";
+  return "bg-stone-100 text-stone-500";
+}
+
+function getSubjectLabel(subject: string | null | undefined) {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "未设置";
+}
+
+function getSubjectClassName(subject: string | null | undefined) {
+  if (subject === "english") return "bg-sky-50 text-sky-700";
+  if (subject === "math") return "bg-violet-50 text-violet-700";
   return "bg-stone-100 text-stone-500";
 }
 
@@ -171,6 +189,7 @@ function AdminClassesContent() {
         id,
         name,
         school,
+        subject,
         status,
         cohort_id,
         cohorts(name),
@@ -203,6 +222,7 @@ function AdminClassesContent() {
         id: classItem.id,
         name: classItem.name,
         school: classItem.school,
+        subject: classItem.subject,
         status: classItem.status,
         cohortId: classItem.cohort_id,
         cohortName: classItem.cohorts?.name || "未设置届别",
@@ -627,10 +647,6 @@ function AdminClassesContent() {
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               班级与分班查询
             </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              本页面只用于查看班级、届别、小老师和学生分布情况。班级信息修改、人员调整、密码重置、删除恢复等维护操作会统一放到维护中心处理。
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -650,7 +666,6 @@ function AdminClassesContent() {
           </div>
         </div>
 
-
         {message && (
           <div className="mb-6 rounded-2xl border border-emerald-100 bg-white p-4 text-sm font-semibold text-emerald-800 shadow-sm">
             {message}
@@ -663,10 +678,6 @@ function AdminClassesContent() {
               <h2 className="text-xl font-bold text-emerald-950">
                 已导入班级
               </h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                默认只显示运行中的班级。已封存的历史届别不会出现在默认列表里，但可以通过筛选查看。
-              </p>
             </div>
 
             <div className="flex flex-col gap-3 md:items-end">
@@ -727,11 +738,12 @@ function AdminClassesContent() {
             </p>
           ) : (
             <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100">
-              <table className="w-full min-w-[1000px] border-collapse bg-white text-left text-sm">
+              <table className="w-full min-w-[1080px] border-collapse bg-white text-left text-sm">
                 <thead className="bg-[#fffdf4] text-stone-600">
                   <tr>
                     <th className="px-4 py-3 font-semibold">届别</th>
                     <th className="px-4 py-3 font-semibold">班级</th>
+                    <th className="px-4 py-3 font-semibold">学科</th>
                     <th className="px-4 py-3 font-semibold">合作学校</th>
                     <th className="px-4 py-3 font-semibold">小老师</th>
                     <th className="px-4 py-3 font-semibold">学生名单</th>
@@ -753,6 +765,16 @@ function AdminClassesContent() {
 
                       <td className="px-4 py-4 align-top font-bold text-emerald-950">
                         {classItem.name}
+                      </td>
+
+                      <td className="px-4 py-4 align-top">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
+                            classItem.subject
+                          )}`}
+                        >
+                          {getSubjectLabel(classItem.subject)}
+                        </span>
                       </td>
 
                       <td className="px-4 py-4 align-top text-stone-600">

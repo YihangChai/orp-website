@@ -12,6 +12,11 @@ import AdminGuard from "@/components/AdminGuard";
  * 2. 页面确认管理员身份后，再读取班级详情。
  * 3. 本页面只读班级、成员、课程记录、教学目标和出勤数据。
  * 4. 后续数据量变大后，课程记录可以做分页，出勤统计可以改成数据库聚合。
+ *
+ * 学科展示原则：
+ * - 班级学科只在页面标题旁边显示一次。
+ * - 学生不单独显示学科，因为学生学科由当前班级推导。
+ * - 小老师学科默认不重复显示；只有和班级学科冲突时才提示。
  */
 
 /* =========================
@@ -42,6 +47,7 @@ type TeacherItem = {
   id: string;
   name: string;
   email: string | null;
+  subject: string | null;
   status: string;
 };
 
@@ -68,6 +74,7 @@ type ClassDetailData = {
   id: string;
   name: string;
   school: string | null;
+  subject: string | null;
   status: string;
   cohort_id: string | null;
   cohorts: {
@@ -119,6 +126,26 @@ function getStatusClassName(status: string) {
   if (status === "delete_requested") return "bg-red-50 text-red-700";
   if (status === "completed") return "bg-blue-50 text-blue-700";
   return "bg-stone-100 text-stone-600";
+}
+
+function getSubjectLabel(subject: string | null | undefined) {
+  if (subject === "english") return "英语";
+  if (subject === "math") return "数学";
+  return "未设置";
+}
+
+function getSubjectClassName(subject: string | null | undefined) {
+  if (subject === "english") return "bg-sky-50 text-sky-700";
+  if (subject === "math") return "bg-violet-50 text-violet-700";
+  return "bg-stone-100 text-stone-500";
+}
+
+function hasTeacherSubjectConflict(
+  teacherSubject: string | null | undefined,
+  classSubject: string | null | undefined
+) {
+  if (!teacherSubject || !classSubject) return false;
+  return teacherSubject !== classSubject;
 }
 
 function getMondayKey(dateString: string) {
@@ -181,84 +208,84 @@ function getTeachingFrequencySummary(lessons: LessonRecordItem[]) {
   };
 }
 
-  function getAttendanceSummary(
-    attendanceRecords: AttendanceItem[],
-    students: StudentItem[]
-  ) {
-    if (attendanceRecords.length === 0) {
-      return {
-        totalRecords: 0,
-        presentRecords: 0,
-        attendanceRate: null as number | null,
-        studentSummaries: [] as AttendanceStudentSummary[],
-      };
-    }
-
-    let presentRecords = 0;
-
-    const studentSummaryMap = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        total: number;
-        present: number;
-      }
-    >();
-
-    students.forEach((student) => {
-      studentSummaryMap.set(student.id, {
-        id: student.id,
-        name: student.name,
-        total: 0,
-        present: 0,
-      });
-    });
-
-    attendanceRecords.forEach((record) => {
-      if (record.is_present) {
-        presentRecords += 1;
-      }
-
-      if (!record.student_id) return;
-
-      const studentSummary = studentSummaryMap.get(record.student_id);
-
-      if (!studentSummary) return;
-
-      studentSummary.total += 1;
-
-      if (record.is_present) {
-        studentSummary.present += 1;
-      }
-    });
-
-    const attendanceRate = Math.round(
-      (presentRecords / attendanceRecords.length) * 100
-    );
-
-    const studentSummaries = Array.from(studentSummaryMap.values()).map(
-      (student) => {
-        return {
-          id: student.id,
-          name: student.name,
-          total: student.total,
-          present: student.present,
-          rate:
-            student.total === 0
-              ? null
-              : Math.round((student.present / student.total) * 100),
-        };
-      }
-    );
-
+function getAttendanceSummary(
+  attendanceRecords: AttendanceItem[],
+  students: StudentItem[]
+) {
+  if (attendanceRecords.length === 0) {
     return {
-      totalRecords: attendanceRecords.length,
-      presentRecords,
-      attendanceRate,
-      studentSummaries,
+      totalRecords: 0,
+      presentRecords: 0,
+      attendanceRate: null as number | null,
+      studentSummaries: [] as AttendanceStudentSummary[],
     };
   }
+
+  let presentRecords = 0;
+
+  const studentSummaryMap = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      total: number;
+      present: number;
+    }
+  >();
+
+  students.forEach((student) => {
+    studentSummaryMap.set(student.id, {
+      id: student.id,
+      name: student.name,
+      total: 0,
+      present: 0,
+    });
+  });
+
+  attendanceRecords.forEach((record) => {
+    if (record.is_present) {
+      presentRecords += 1;
+    }
+
+    if (!record.student_id) return;
+
+    const studentSummary = studentSummaryMap.get(record.student_id);
+
+    if (!studentSummary) return;
+
+    studentSummary.total += 1;
+
+    if (record.is_present) {
+      studentSummary.present += 1;
+    }
+  });
+
+  const attendanceRate = Math.round(
+    (presentRecords / attendanceRecords.length) * 100
+  );
+
+  const studentSummaries = Array.from(studentSummaryMap.values()).map(
+    (student) => {
+      return {
+        id: student.id,
+        name: student.name,
+        total: student.total,
+        present: student.present,
+        rate:
+          student.total === 0
+            ? null
+            : Math.round((student.present / student.total) * 100),
+      };
+    }
+  );
+
+  return {
+    totalRecords: attendanceRecords.length,
+    presentRecords,
+    attendanceRate,
+    studentSummaries,
+  };
+}
 
 /* =========================
    3. 页面外壳：只负责 AdminGuard
@@ -298,11 +325,12 @@ function AdminClassDetailContent() {
         id,
         name,
         school,
+        subject,
         status,
         cohort_id,
         cohorts(name, status),
         class_teachers(
-          teachers(id, name, email, status)
+          teachers(id, name, email, subject, status)
         ),
         class_students(
           students(id, name, note, status)
@@ -414,7 +442,7 @@ function AdminClassDetailContent() {
     };
   }, [classId]);
 
-    /* =========================
+  /* =========================
      6. 派生数据：必须放在所有 return 之前
      ========================= */
 
@@ -518,6 +546,14 @@ function AdminClassDetailContent() {
               </h1>
 
               <span
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
+                  classData.subject
+                )}`}
+              >
+                {getSubjectLabel(classData.subject)}
+              </span>
+
+              <span
                 className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClassName(
                   classData.status
                 )}`}
@@ -525,10 +561,6 @@ function AdminClassDetailContent() {
                 {getStatusLabel(classData.status)}
               </span>
             </div>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里用于查看单个班级的成员、教学目标、课程记录和基础运行情况。
-            </p>
           </div>
 
           <Link
@@ -610,20 +642,35 @@ function AdminClassDetailContent() {
                 </p>
               ) : (
                 <div className="mt-4 space-y-2">
-                  {teachers.map((teacher) => (
-                    <div
-                      key={teacher.id}
-                      className="rounded-xl bg-[#fffdf4] p-3"
-                    >
-                      <p className="text-sm font-bold text-emerald-950">
-                        {teacher.name}
-                      </p>
+                  {teachers.map((teacher) => {
+                    const subjectConflict = hasTeacherSubjectConflict(
+                      teacher.subject,
+                      classData.subject
+                    );
 
-                      <p className="mt-1 text-xs text-stone-500">
-                        {teacher.email || "暂未填写邮箱"}
-                      </p>
-                    </div>
-                  ))}
+                    return (
+                      <div
+                        key={teacher.id}
+                        className="rounded-xl bg-[#fffdf4] p-3"
+                      >
+                        <p className="text-sm font-bold text-emerald-950">
+                          {teacher.name}
+                        </p>
+
+                        <p className="mt-1 text-xs text-stone-500">
+                          {teacher.email || "暂未填写邮箱"}
+                        </p>
+
+                        {subjectConflict && (
+                          <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                            学科不一致：老师为
+                            {getSubjectLabel(teacher.subject)}，班级为
+                            {getSubjectLabel(classData.subject)}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -659,15 +706,11 @@ function AdminClassDetailContent() {
           </section>
 
           <section className="space-y-6">
-            <section className="grid gap-4 md:grid-cols-2">
+            <section className="grid gap-3 md:grid-cols-2">
               <section className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
                 <h2 className="text-xl font-bold text-emerald-950">
                   上课频率
                 </h2>
-
-                <p className="mt-2 text-sm leading-7 text-stone-600">
-                  这里先展示原始频率数据，后续再根据 ORP 标准判断是否需要关注。
-                </p>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-2xl bg-[#fffdf4] p-4">
@@ -684,7 +727,7 @@ function AdminClassDetailContent() {
                       近 4 周上课次数
                     </p>
                     <p className="mt-2 text-lg font-bold text-emerald-950">
-                      {teachingFrequency.recentFourWeeksCount}次
+                      {teachingFrequency.recentFourWeeksCount} 次
                     </p>
                   </div>
 
@@ -694,15 +737,6 @@ function AdminClassDetailContent() {
                     </p>
                     <p className="mt-2 text-lg font-bold text-emerald-950">
                       {teachingFrequency.totalActiveWeeks} 周
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl bg-[#fffdf4] p-4">
-                    <p className="text-xs font-semibold text-stone-500">
-                      平均每个有课周
-                    </p>
-                    <p className="mt-2 text-lg font-bold text-emerald-950">
-                      {teachingFrequency.averageLessonsPerActiveWeek} 节
                     </p>
                   </div>
                 </div>
@@ -770,10 +804,6 @@ function AdminClassDetailContent() {
                   <h2 className="text-xl font-bold text-emerald-950">
                     教学目标
                   </h2>
-
-                  <p className="mt-2 text-sm leading-7 text-stone-600">
-                    当前班级的目标会帮助管理员判断课程是否有连续性。
-                  </p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -834,10 +864,6 @@ function AdminClassDetailContent() {
 
             <section className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
               <h2 className="text-xl font-bold text-emerald-950">课程记录</h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                这里显示这个班级所有已提交的课程记录。后续可以继续加入学生留言和出勤情况。
-              </p>
 
               {lessons.length === 0 ? (
                 <p className="mt-5 rounded-2xl bg-[#fffdf4] p-4 text-sm text-stone-600">
