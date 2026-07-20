@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 const principles = [
   "持续陪伴",
   "认真记录",

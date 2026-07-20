@@ -28,9 +28,51 @@ type StudentRecord = {
   created_at: string;
 };
 
+type CohortRelationItem = {
+  id: string;
+  name: string;
+  status: string | null;
+};
+
+type ClassTeacherRelationItem = {
+  teachers:
+    | {
+        id: string;
+        name: string;
+        email: string | null;
+        subject: string | null;
+        status: string | null;
+      }
+    | {
+        id: string;
+        name: string;
+        email: string | null;
+        subject: string | null;
+        status: string | null;
+      }[]
+    | null;
+};
+
+type RelatedClassItem = {
+  id: string;
+  name: string;
+  school: string | null;
+  subject: string | null;
+  status: string | null;
+  cohort_id: string | null;
+  cohorts:
+    | CohortRelationItem
+    | CohortRelationItem[]
+    | null;
+  class_teachers:
+    | ClassTeacherRelationItem
+    | ClassTeacherRelationItem[]
+    | null;
+};
+
 type ClassRelation = {
   class_id: string;
-  classes: any;
+  classes: RelatedClassItem | RelatedClassItem[] | null;
 };
 
 type TeachingGoal = {
@@ -297,6 +339,152 @@ function getAttentionLabel({
   };
 }
 
+async function fetchStudentDetailData(
+  studentId: string
+): Promise<StudentDetailData> {
+  const { data: studentData, error: studentError } = await supabase
+    .from("students")
+    .select("id, name, note, status, username, grade, created_at")
+    .eq("id", studentId)
+    .maybeSingle();
+
+  if (studentError) {
+    throw new Error(`读取学生资料失败：${studentError.message}`);
+  }
+
+  if (!studentData) {
+    throw new Error(
+      "没有找到这个学生。可能这个学生已经被删除，或者链接里的 ID 不正确。"
+    );
+  }
+
+  const student = studentData as StudentRecord;
+
+  const { data: classRelationsData, error: classRelationError } =
+    await supabase
+      .from("class_students")
+      .select(
+        `
+          class_id,
+          classes (
+            id,
+            name,
+            school,
+            subject,
+            status,
+            cohort_id,
+            cohorts (
+              id,
+              name,
+              status
+            ),
+            class_teachers (
+              teachers (
+                id,
+                name,
+                email,
+                subject,
+                status
+              )
+            )
+          )
+        `
+      )
+      .eq("student_id", studentId);
+
+  if (classRelationError) {
+    throw new Error(`读取班级关系失败：${classRelationError.message}`);
+  }
+
+  const classRelations =
+    (classRelationsData ?? []) as unknown as ClassRelation[];
+
+  const classIds = classRelations
+    .map((relation) => relation.class_id)
+    .filter((classId): classId is string => Boolean(classId));
+
+  let teachingGoals: TeachingGoal[] = [];
+  let lessonRecords: LessonRecord[] = [];
+
+  if (classIds.length > 0) {
+    const [goalResult, lessonResult] = await Promise.all([
+      supabase
+        .from("teaching_goals")
+        .select(
+          "id, class_id, title, description, expected_lessons, status, created_at"
+        )
+        .in("class_id", classIds)
+        .order("created_at", { ascending: false }),
+
+      supabase
+        .from("lesson_records")
+        .select(
+          "id, teacher_id, class_id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, teacher_reflection, created_at"
+        )
+        .in("class_id", classIds)
+        .order("lesson_date", { ascending: false }),
+    ]);
+
+    if (goalResult.error) {
+      throw new Error(`读取学习目标失败：${goalResult.error.message}`);
+    }
+
+    if (lessonResult.error) {
+      throw new Error(`读取课程记录失败：${lessonResult.error.message}`);
+    }
+
+    teachingGoals = (goalResult.data ?? []) as TeachingGoal[];
+    lessonRecords = (lessonResult.data ?? []) as LessonRecord[];
+  }
+
+  const lessonIds = new Set(
+    lessonRecords.map((lesson) => lesson.id)
+  );
+
+  const [attendanceResult, commentResult] = await Promise.all([
+    supabase
+      .from("lesson_attendance")
+      .select("id, lesson_record_id, student_id, is_present, created_at")
+      .eq("student_id", studentId),
+
+    supabase
+      .from("student_lesson_comments")
+      .select(
+        "id, lesson_record_id, student_id, student_name, comment, created_at"
+      )
+      .or(`student_id.eq.${studentId},student_name.eq.${student.name}`)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (attendanceResult.error) {
+    throw new Error(
+      `读取出勤记录失败：${attendanceResult.error.message}`
+    );
+  }
+
+  if (commentResult.error) {
+    throw new Error(
+      `读取学生反馈失败：${commentResult.error.message}`
+    );
+  }
+
+  const attendanceRecords = (
+    (attendanceResult.data ?? []) as AttendanceRecord[]
+  ).filter((attendance) =>
+    lessonIds.has(attendance.lesson_record_id)
+  );
+
+  return {
+    student,
+    classRelations,
+    teachingGoals,
+    lessonRecords,
+    attendanceRecords,
+    studentComments:
+      (commentResult.data ?? []) as StudentComment[],
+  };
+}
+
 export default function StudentDetailPage() {
   return (
     <AdminGuard>
@@ -317,152 +505,45 @@ function StudentDetailContent() {
   const [showAllLessons, setShowAllLessons] = useState(false);
   const [showAllComments, setShowAllComments] = useState(false);
 
-  async function fetchStudentDetail() {
-    setIsLoading(true);
-    setMessage("");
+useEffect(() => {
+  let isCancelled = false;
+
+  async function loadStudentDetail() {
+    if (!studentId) {
+      return;
+    }
 
     try {
-      const { data: studentData, error: studentError } = await supabase
-        .from("students")
-        .select("id, name, note, status, username, grade, created_at")
-        .eq("id", studentId)
-        .maybeSingle();
+      const loadedData = await fetchStudentDetailData(studentId);
 
-      if (studentError) {
-        throw new Error(`读取学生资料失败：${studentError.message}`);
+      if (isCancelled) {
+        return;
       }
 
-      if (!studentData) {
-        throw new Error(
-          "没有找到这个学生。可能这个学生已经被删除，或者链接里的 ID 不正确。"
-        );
-      }
-
-      const student = studentData as StudentRecord;
-
-      const { data: classRelationsData, error: classRelationError } =
-        await supabase
-          .from("class_students")
-          .select(
-            `
-            class_id,
-            classes (
-              id,
-              name,
-              school,
-              subject,
-              status,
-              cohort_id,
-              cohorts (
-                id,
-                name,
-                status
-              ),
-              class_teachers (
-                teachers (
-                  id,
-                  name,
-                  email,
-                  subject,
-                  status
-                )
-              )
-            )
-          `
-          )
-          .eq("student_id", studentId);
-
-      if (classRelationError) {
-        throw new Error(`读取班级关系失败：${classRelationError.message}`);
-      }
-
-      const classRelations = (classRelationsData || []) as ClassRelation[];
-
-      const classIds = classRelations
-        .map((relation) => relation.class_id)
-        .filter(Boolean);
-
-      let teachingGoals: TeachingGoal[] = [];
-      let lessonRecords: LessonRecord[] = [];
-
-      if (classIds.length > 0) {
-        const { data: goalData, error: goalError } = await supabase
-          .from("teaching_goals")
-          .select(
-            "id, class_id, title, description, expected_lessons, status, created_at"
-          )
-          .in("class_id", classIds)
-          .order("created_at", { ascending: false });
-
-        if (goalError) {
-          throw new Error(`读取学习目标失败：${goalError.message}`);
-        }
-
-        teachingGoals = (goalData || []) as TeachingGoal[];
-
-        const { data: lessonData, error: lessonError } = await supabase
-          .from("lesson_records")
-          .select(
-            "id, teacher_id, class_id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, teacher_reflection, created_at"
-          )
-          .in("class_id", classIds)
-          .order("lesson_date", { ascending: false });
-
-        if (lessonError) {
-          throw new Error(`读取课程记录失败：${lessonError.message}`);
-        }
-
-        lessonRecords = (lessonData || []) as LessonRecord[];
-      }
-
-      const lessonIds = new Set(lessonRecords.map((lesson) => lesson.id));
-
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from("lesson_attendance")
-        .select("id, lesson_record_id, student_id, is_present, created_at")
-        .eq("student_id", studentId);
-
-      if (attendanceError) {
-        throw new Error(`读取出勤记录失败：${attendanceError.message}`);
-      }
-
-      const attendanceRecords = (
-        (attendanceData || []) as AttendanceRecord[]
-      ).filter((attendance) => lessonIds.has(attendance.lesson_record_id));
-
-      const { data: commentData, error: commentError } = await supabase
-        .from("student_lesson_comments")
-        .select(
-          "id, lesson_record_id, student_id, student_name, comment, created_at"
-        )
-        .or(`student_id.eq.${studentId},student_name.eq.${student.name}`)
-        .order("created_at", { ascending: false });
-
-      if (commentError) {
-        throw new Error(`读取学生反馈失败：${commentError.message}`);
-      }
-
-      setDetailData({
-        student,
-        classRelations,
-        teachingGoals,
-        lessonRecords,
-        attendanceRecords,
-        studentComments: (commentData || []) as StudentComment[],
-      });
+      setDetailData(loadedData);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "读取学生详情失败。");
+      if (isCancelled) {
+        return;
+      }
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "读取学生详情失败。"
+      );
     } finally {
-      setIsLoading(false);
+      if (!isCancelled) {
+        setIsLoading(false);
+      }
     }
   }
 
-  useEffect(() => {
-    if (studentId) {
-      fetchStudentDetail();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studentId]);
+  void loadStudentDetail();
+
+  return () => {
+    isCancelled = true;
+  };
+}, [studentId]);
 
   const computed = useMemo(() => {
     if (!detailData) return null;
@@ -486,13 +567,16 @@ function StudentDetailContent() {
 
     const classSummaries: StudentClassSummary[] = classRelations.map(
       (relation) => {
-        const classItem = relation.classes;
+        const classItem = getOne(relation.classes);
         const cohort = getOne(classItem?.cohorts);
-        const teachers = getMany(classItem?.class_teachers);
+        const teacherRelations = getMany(classItem?.class_teachers);
 
         const teacherNames = uniqueStrings(
-          teachers
-            .map((teacherRelation: any) => teacherRelation.teachers?.name)
+          teacherRelations
+            .map((teacherRelation) => {
+              const teacher = getOne(teacherRelation.teachers);
+              return teacher?.name || "";
+            })
             .filter(Boolean)
         );
 

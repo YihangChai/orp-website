@@ -115,70 +115,147 @@ function AdminMaintenanceContent() {
   const [selectedCohortId, setSelectedCohortId] = useState("");
 
   async function refreshData() {
-    setIsLoading(true);
-    setMessage("");
+  setIsLoading(true);
 
-    try {
-      const overview = (await fetchMaintenanceOverview()) as OverviewData;
-      setData(overview);
+  try {
+    const overview = (await fetchMaintenanceOverview()) as OverviewData;
 
-      const firstClassId = selectedClassId || overview.classes[0]?.id || "";
-      const firstClass = overview.classes.find(
-        (classItem) => classItem.id === firstClassId
+    setData(overview);
+
+    const nextClassId =
+      selectedClassId &&
+      overview.classes.some((classItem) => classItem.id === selectedClassId)
+        ? selectedClassId
+        : overview.classes[0]?.id || "";
+
+    const nextClass = overview.classes.find(
+      (classItem) => classItem.id === nextClassId
+    );
+
+    if (nextClassId !== selectedClassId) {
+      setSelectedClassId(nextClassId);
+    }
+
+    if (nextClass) {
+      setEditClassName(nextClass.name);
+      setEditClassSchool(nextClass.school || "");
+    } else {
+      setEditClassName("");
+      setEditClassSchool("");
+    }
+
+    const teacherSelectionStillValid = overview.teachers.some(
+      (teacher) =>
+        teacher.id === selectedTeacherToAdd && teacher.status === "active"
+    );
+
+    if (!teacherSelectionStillValid) {
+      const firstActiveTeacher = overview.teachers.find(
+        (teacher) => teacher.status === "active"
       );
 
-      if (!selectedClassId && firstClassId) {
-        setSelectedClassId(firstClassId);
+      setSelectedTeacherToAdd(firstActiveTeacher?.id || "");
+    }
+
+    const studentSelectionStillValid = overview.students.some(
+      (student) =>
+        student.id === selectedStudentToAdd && student.status === "active"
+    );
+
+    if (!studentSelectionStillValid) {
+      const firstActiveStudent = overview.students.find(
+        (student) => student.status === "active"
+      );
+
+      setSelectedStudentToAdd(firstActiveStudent?.id || "");
+    }
+
+    const cohortSelectionStillValid = overview.cohorts.some(
+      (cohort) =>
+        cohort.id === selectedCohortId && cohort.status === "active"
+    );
+
+    if (!cohortSelectionStillValid) {
+      const firstActiveCohort = overview.cohorts.find(
+        (cohort) => cohort.status === "active"
+      );
+
+      setSelectedCohortId(firstActiveCohort?.id || "");
+    }
+  } catch (error) {
+    setMessage(
+      error instanceof Error ? error.message : "读取维护中心数据失败。"
+    );
+  } finally {
+    setIsLoading(false);
+  }
+}
+
+useEffect(() => {
+  let isCancelled = false;
+
+  async function loadInitialData() {
+    try {
+      const overview = (await fetchMaintenanceOverview()) as OverviewData;
+
+      if (isCancelled) {
+        return;
       }
 
+      setData(overview);
+
+      const firstClass = overview.classes[0];
+
       if (firstClass) {
+        setSelectedClassId(firstClass.id);
         setEditClassName(firstClass.name);
         setEditClassSchool(firstClass.school || "");
       }
 
-      if (!selectedTeacherToAdd) {
-        const firstActiveTeacher = overview.teachers.find(
-          (teacher) => teacher.status === "active"
-        );
+      const firstActiveTeacher = overview.teachers.find(
+        (teacher) => teacher.status === "active"
+      );
 
-        if (firstActiveTeacher) {
-          setSelectedTeacherToAdd(firstActiveTeacher.id);
-        }
+      if (firstActiveTeacher) {
+        setSelectedTeacherToAdd(firstActiveTeacher.id);
       }
 
-      if (!selectedStudentToAdd) {
-        const firstActiveStudent = overview.students.find(
-          (student) => student.status === "active"
-        );
+      const firstActiveStudent = overview.students.find(
+        (student) => student.status === "active"
+      );
 
-        if (firstActiveStudent) {
-          setSelectedStudentToAdd(firstActiveStudent.id);
-        }
+      if (firstActiveStudent) {
+        setSelectedStudentToAdd(firstActiveStudent.id);
       }
 
-      if (!selectedCohortId) {
-        const firstActiveCohort = overview.cohorts.find(
-          (cohort) => cohort.status === "active"
-        );
+      const firstActiveCohort = overview.cohorts.find(
+        (cohort) => cohort.status === "active"
+      );
 
-        if (firstActiveCohort) {
-          setSelectedCohortId(firstActiveCohort.id);
-        }
+      if (firstActiveCohort) {
+        setSelectedCohortId(firstActiveCohort.id);
       }
     } catch (error) {
+      if (isCancelled) {
+        return;
+      }
+
       setMessage(
         error instanceof Error ? error.message : "读取维护中心数据失败。"
       );
     } finally {
-      setIsLoading(false);
+      if (!isCancelled) {
+        setIsLoading(false);
+      }
     }
   }
 
-  useEffect(() => {
-    refreshData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  void loadInitialData();
 
+  return () => {
+    isCancelled = true;
+  };
+}, []);
   const selectedClass = useMemo(() => {
     return data?.classes.find((classItem) => classItem.id === selectedClassId);
   }, [data, selectedClassId]);
@@ -331,7 +408,7 @@ function AdminMaintenanceContent() {
     targetId: string;
     targetName: string;
     note: string;
-    actionPayload?: Record<string, any>;
+    actionPayload?: Record<string, unknown>;
   }) {
     if (!data) return;
 

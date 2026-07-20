@@ -52,6 +52,77 @@ type AdminOverviewData = {
   pendingRequests: PendingRequest[];
 };
 
+type ClassSearchRow = {
+  id: string;
+  name: string | null;
+  school: string | null;
+  status: string;
+  cohort_id: string | null;
+  cohorts: {
+    name: string;
+  } | null;
+  class_teachers:
+    | {
+        teachers: {
+          name: string;
+        } | null;
+      }[]
+    | null;
+  class_students:
+    | {
+        students: {
+          name: string;
+        } | null;
+      }[]
+    | null;
+};
+
+type TeacherSearchRow = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  status: string | null;
+};
+
+type StudentSearchRow = {
+  id: string;
+  name: string | null;
+  note: string | null;
+  status: string | null;
+};
+
+type LessonSearchRow = {
+  id: string;
+  lesson_title: string | null;
+  lesson_date: string | null;
+  duration_minutes: number | null;
+  lesson_content_and_feedback: string | null;
+  homework: string | null;
+  next_plan: string | null;
+};
+
+type StudentCommentSearchRow = {
+  id: string;
+  student_name: string | null;
+  comment: string | null;
+  created_at: string;
+};
+
+type ParentMessageSearchRow = {
+  id: string;
+  student_name: string | null;
+  parent_name: string | null;
+  message: string | null;
+  created_at: string;
+};
+
+type CountOptions = {
+  column?: string;
+  value?: string;
+  gteColumn?: string;
+  gteValue?: string;
+};
+
 const navItems = [
   ["总览", "/admin"],
   ["班级管理", "/admin/classes"],
@@ -172,6 +243,123 @@ function getStatusLabel(status: string) {
   return status;
 }
 
+async function getCount(tableName: string, options?: CountOptions) {
+  let query = supabase
+    .from(tableName)
+    .select("id", { count: "exact", head: true });
+
+  if (options?.column && options.value !== undefined) {
+    query = query.eq(options.column, options.value);
+  }
+
+  if (options?.gteColumn && options.gteValue !== undefined) {
+    query = query.gte(options.gteColumn, options.gteValue);
+  }
+
+  const { count, error } = await query;
+
+  if (error) {
+    throw new Error(`读取 ${tableName} 数量失败：${error.message}`);
+  }
+
+  return count ?? 0;
+}
+
+async function loadAdminOverviewData(): Promise<AdminOverviewData> {
+  const oneWeekAgo = new Date();
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+  const [
+    activeClassCount,
+    studentCount,
+    teacherCount,
+    lessonRecordCount,
+    studentCommentCount,
+    weeklyStudentCommentCount,
+    parentMessageCount,
+    requestResult,
+  ] = await Promise.all([
+    getCount("classes", {
+      column: "status",
+      value: "active",
+    }),
+
+    getCount("students", {
+      column: "status",
+      value: "active",
+    }),
+
+    getCount("teachers", {
+      column: "status",
+      value: "active",
+    }),
+
+    getCount("lesson_records"),
+
+    getCount("student_lesson_comments"),
+
+    getCount("student_lesson_comments", {
+      gteColumn: "created_at",
+      gteValue: oneWeekAgo.toISOString(),
+    }),
+
+    getCount("parent_messages"),
+
+    supabase
+      .from("admin_action_requests")
+      .select(
+        "id, action_type, target_type, target_id, target_name, status, approvals_count, required_approvals, note"
+      )
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
+
+  if (requestResult.error) {
+    throw new Error(
+      `读取待处理申请失败：${requestResult.error.message}`
+    );
+  }
+
+  const stats: AdminStat[] = [
+    {
+      label: "班级",
+      value: String(activeClassCount),
+      note: "正在运行",
+    },
+    {
+      label: "学生",
+      value: String(studentCount),
+      note: "人",
+    },
+    {
+      label: "小老师",
+      value: String(teacherCount),
+      note: "人",
+    },
+    {
+      label: "课程记录",
+      value: String(lessonRecordCount),
+      note: "累计提交",
+    },
+    {
+      label: "学生留言",
+      value: String(studentCommentCount),
+      note: `本周新增 ${weeklyStudentCommentCount} 条`,
+    },
+    {
+      label: "家长反馈",
+      value: String(parentMessageCount),
+      note: "累计收到",
+    },
+  ];
+
+  return {
+    stats,
+    pendingRequests: (requestResult.data ?? []) as PendingRequest[],
+  };
+}
+
 export default function AdminPage() {
   return (
     <AdminGuard>
@@ -198,115 +386,6 @@ function AdminHomeContent() {
   const keyword = searchTerm.trim().toLowerCase();
   const hasSearchTerm = keyword.length > 0;
 
-  async function getCount(
-    tableName: string,
-    options?: {
-      column?: string;
-      value?: string;
-      gteColumn?: string;
-      gteValue?: string;
-    }
-  ) {
-    let query = supabase
-      .from(tableName)
-      .select("id", { count: "exact", head: true });
-
-    if (options?.column && options?.value) {
-      query = query.eq(options.column, options.value);
-    }
-
-    if (options?.gteColumn && options?.gteValue) {
-      query = query.gte(options.gteColumn, options.gteValue);
-    }
-
-    const { count, error } = await query;
-
-    if (error) {
-      console.error(`Count error on ${tableName}:`, error.message);
-      return 0;
-    }
-
-    return count || 0;
-  }
-
-  async function loadAdminOverviewData(): Promise<AdminOverviewData> {
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
-    const [
-      activeClassCount,
-      studentCount,
-      teacherCount,
-      lessonRecordCount,
-      studentCommentCount,
-      weeklyStudentCommentCount,
-      parentMessageCount,
-      requestResult,
-    ] = await Promise.all([
-      getCount("classes", { column: "status", value: "active" }),
-      getCount("students", { column: "status", value: "active" }),
-      getCount("teachers", { column: "status", value: "active" }),
-      getCount("lesson_records"),
-      getCount("student_lesson_comments"),
-      getCount("student_lesson_comments", {
-        gteColumn: "created_at",
-        gteValue: oneWeekAgo.toISOString(),
-      }),
-      getCount("parent_messages"),
-
-      supabase
-        .from("admin_action_requests")
-        .select(
-          "id, action_type, target_type, target_id, target_name, status, approvals_count, required_approvals, note"
-        )
-        .eq("status", "pending")
-        .order("created_at", { ascending: false })
-        .limit(20),
-    ]);
-
-    if (requestResult.error) {
-      setMessage(`读取待处理申请失败：${requestResult.error.message}`);
-    }
-
-    const stats: AdminStat[] = [
-      {
-        label: "班级",
-        value: String(activeClassCount),
-        note: "正在运行",
-      },
-      {
-        label: "学生",
-        value: String(studentCount),
-        note: "人",
-      },
-      {
-        label: "小老师",
-        value: String(teacherCount),
-        note: "人",
-      },
-      {
-        label: "课程记录",
-        value: String(lessonRecordCount),
-        note: "累计提交",
-      },
-      {
-        label: "学生留言",
-        value: String(studentCommentCount),
-        note: `本周新增 ${weeklyStudentCommentCount} 条`,
-      },
-      {
-        label: "家长反馈",
-        value: String(parentMessageCount),
-        note: "累计收到",
-      },
-    ];
-
-    return {
-      stats,
-      pendingRequests: (requestResult.data || []) as PendingRequest[],
-    };
-  }
-
   async function refreshAdminOverview() {
     setIsLoading(true);
     setMessage("");
@@ -327,31 +406,128 @@ function AdminHomeContent() {
     }
   }
 
-  function applyTextSearch(query: any, columns: string[], activeKeyword: string) {
-    if (isGenericTypeKeyword(activeKeyword)) {
-      return query;
+    function buildTextSearchConditions(
+      columns: string[],
+      activeKeyword: string
+    ) {
+      if (isGenericTypeKeyword(activeKeyword)) {
+        return "";
+      }
+
+      const searchPattern = `%${activeKeyword}%`;
+
+      return columns
+        .map((column) => `${column}.ilike.${searchPattern}`)
+        .join(",");
     }
 
-    const searchPattern = `%${activeKeyword}%`;
-    const orConditions = columns
-      .map((column) => `${column}.ilike.${searchPattern}`)
-      .join(",");
-
-    return query.or(orConditions);
-  }
-
-  async function loadSearchResults(activeKeyword: string) {
+  async function loadSearchResults(
+    activeKeyword: string
+  ): Promise<SearchItem[]> {
     const typeFilter = getSearchTypeFilter(activeKeyword);
-    const shouldSearchClass = typeFilter === "all" || typeFilter === "class";
-    const shouldSearchTeacher = typeFilter === "all" || typeFilter === "teacher";
-    const shouldSearchStudent = typeFilter === "all" || typeFilter === "student";
-    const shouldSearchRecord = typeFilter === "all" || typeFilter === "record";
-    const shouldSearchMessage = typeFilter === "all" || typeFilter === "message";
 
-    const emptyResult = {
-      data: [],
-      error: null,
-    };
+    const shouldSearchClass =
+      typeFilter === "all" || typeFilter === "class";
+
+    const shouldSearchTeacher =
+      typeFilter === "all" || typeFilter === "teacher";
+
+    const shouldSearchStudent =
+      typeFilter === "all" || typeFilter === "student";
+
+    const shouldSearchRecord =
+      typeFilter === "all" || typeFilter === "record";
+
+    const shouldSearchMessage =
+      typeFilter === "all" || typeFilter === "message";
+
+    const classSearchConditions = buildTextSearchConditions(
+      ["name", "school", "status"],
+      activeKeyword
+    );
+
+    const teacherSearchConditions = buildTextSearchConditions(
+      ["name", "email", "status"],
+      activeKeyword
+    );
+
+    const studentSearchConditions = buildTextSearchConditions(
+      ["name", "note", "status"],
+      activeKeyword
+    );
+
+    const lessonSearchConditions = buildTextSearchConditions(
+      [
+        "lesson_title",
+        "lesson_content_and_feedback",
+        "homework",
+        "next_plan",
+      ],
+      activeKeyword
+    );
+
+    const studentCommentSearchConditions = buildTextSearchConditions(
+      ["student_name", "comment"],
+      activeKeyword
+    );
+
+    const parentMessageSearchConditions = buildTextSearchConditions(
+      ["student_name", "parent_name", "message"],
+      activeKeyword
+    );
+
+    const classBaseQuery = supabase
+      .from("classes")
+      .select(
+        `
+          id,
+          name,
+          school,
+          status,
+          cohort_id,
+          cohorts(name),
+          class_teachers(
+            teachers(name)
+          ),
+          class_students(
+            students(name)
+          )
+        `
+      )
+      .order("created_at", { ascending: false })
+      .limit(30);
+
+    const teacherBaseQuery = supabase
+      .from("teachers")
+      .select("id, name, email, status")
+      .order("created_at", { ascending: false })
+      .limit(30);
+
+    const studentBaseQuery = supabase
+      .from("students")
+      .select("id, name, note, status")
+      .order("created_at", { ascending: false })
+      .limit(40);
+
+    const lessonBaseQuery = supabase
+      .from("lesson_records")
+      .select(
+        "id, lesson_title, lesson_date, duration_minutes, lesson_content_and_feedback, homework, next_plan"
+      )
+      .order("lesson_date", { ascending: false })
+      .limit(40);
+
+    const studentCommentBaseQuery = supabase
+      .from("student_lesson_comments")
+      .select("id, student_name, comment, created_at")
+      .order("created_at", { ascending: false })
+      .limit(40);
+
+    const parentMessageBaseQuery = supabase
+      .from("parent_messages")
+      .select("id, student_name, parent_name, message, created_at")
+      .order("created_at", { ascending: false })
+      .limit(40);
 
     const [
       classResult,
@@ -362,98 +538,58 @@ function AdminHomeContent() {
       parentMessageResult,
     ] = await Promise.all([
       shouldSearchClass
-        ? applyTextSearch(
-            supabase
-              .from("classes")
-              .select(
-                `
-                id,
-                name,
-                school,
-                status,
-                cohort_id,
-                cohorts(name),
-                class_teachers(
-                  teachers(name)
-                ),
-                class_students(
-                  students(name)
-                )
-              `
-              )
-              .order("created_at", { ascending: false })
-              .limit(30),
-            ["name", "school", "status"],
-            activeKeyword
-          )
-        : emptyResult,
+        ? classSearchConditions
+          ? classBaseQuery.or(classSearchConditions)
+          : classBaseQuery
+        : Promise.resolve({
+            data: [] as ClassSearchRow[],
+            error: null,
+          }),
 
       shouldSearchTeacher
-        ? applyTextSearch(
-            supabase
-              .from("teachers")
-              .select("id, name, email, status")
-              .order("created_at", { ascending: false })
-              .limit(30),
-            ["name", "email", "status"],
-            activeKeyword
-          )
-        : emptyResult,
+        ? teacherSearchConditions
+          ? teacherBaseQuery.or(teacherSearchConditions)
+          : teacherBaseQuery
+        : Promise.resolve({
+            data: [] as TeacherSearchRow[],
+            error: null,
+          }),
 
       shouldSearchStudent
-        ? applyTextSearch(
-            supabase
-              .from("students")
-              .select("id, name, note, status")
-              .order("created_at", { ascending: false })
-              .limit(40),
-            ["name", "note", "status"],
-            activeKeyword
-          )
-        : emptyResult,
+        ? studentSearchConditions
+          ? studentBaseQuery.or(studentSearchConditions)
+          : studentBaseQuery
+        : Promise.resolve({
+            data: [] as StudentSearchRow[],
+            error: null,
+          }),
 
       shouldSearchRecord
-        ? applyTextSearch(
-            supabase
-              .from("lesson_records")
-              .select(
-                "id, lesson_title, lesson_date, duration_minutes, lesson_content_and_feedback, homework, next_plan"
-              )
-              .order("lesson_date", { ascending: false })
-              .limit(40),
-            [
-              "lesson_title",
-              "lesson_content_and_feedback",
-              "homework",
-              "next_plan",
-            ],
-            activeKeyword
-          )
-        : emptyResult,
+        ? lessonSearchConditions
+          ? lessonBaseQuery.or(lessonSearchConditions)
+          : lessonBaseQuery
+        : Promise.resolve({
+            data: [] as LessonSearchRow[],
+            error: null,
+          }),
 
       shouldSearchMessage
-        ? applyTextSearch(
-            supabase
-              .from("student_lesson_comments")
-              .select("id, student_name, comment, created_at")
-              .order("created_at", { ascending: false })
-              .limit(40),
-            ["student_name", "comment"],
-            activeKeyword
-          )
-        : emptyResult,
+        ? studentCommentSearchConditions
+          ? studentCommentBaseQuery.or(studentCommentSearchConditions)
+          : studentCommentBaseQuery
+        : Promise.resolve({
+            data: [] as StudentCommentSearchRow[],
+            error: null,
+          }),
 
       shouldSearchMessage
-        ? applyTextSearch(
-            supabase
-              .from("parent_messages")
-              .select("id, student_name, parent_name, message, created_at")
-              .order("created_at", { ascending: false })
-              .limit(40),
-            ["student_name", "parent_name", "message"],
-            activeKeyword
-          )
-        : emptyResult,
+        ? parentMessageSearchConditions
+          ? parentMessageBaseQuery.or(parentMessageSearchConditions)
+          : parentMessageBaseQuery
+        : Promise.resolve({
+            data: [] as ParentMessageSearchRow[],
+            error: null,
+          }),
     ]);
 
     const possibleErrors = [
@@ -463,117 +599,139 @@ function AdminHomeContent() {
       lessonResult.error,
       studentCommentResult.error,
       parentMessageResult.error,
-    ].filter(Boolean);
+    ].filter((error) => error !== null);
 
     if (possibleErrors.length > 0) {
       console.error(possibleErrors);
+
       setSearchMessage(
         "部分搜索结果读取失败。请检查相关表字段或 RLS 权限。"
       );
     }
 
-    const classItems: SearchItem[] = ((classResult.data || []) as any[]).map(
-      (classItem) => {
-        const teacherNames =
-          classItem.class_teachers
-            ?.map((item: any) => item.teachers?.name)
-            .filter(Boolean) || [];
+    const classRows = (classResult.data ?? []) as unknown as ClassSearchRow[];
 
-        const studentNames =
-          classItem.class_students
-            ?.map((item: any) => item.students?.name)
-            .filter(Boolean) || [];
+    const teacherRows = (
+      teacherResult.data ?? []
+    ) as unknown as TeacherSearchRow[];
 
-        return {
-          id: `class-${classItem.id}`,
-          type: "class",
-          title: classItem.name || "未命名班级",
-          subtitle: `班级 · ${classItem.cohorts?.name || "未设置届别"} · ${
-            teacherNames.length > 0
-              ? `小老师 ${teacherNames.join("、")}`
-              : "暂未分配小老师"
-          }`,
-          description: `${classItem.school || "暂未填写合作学校"} · ${
-            studentNames.length
-          } 名学生 · 状态：${getStatusLabel(classItem.status)}`,
-          status: getStatusLabel(classItem.status),
-          href: `/admin/classes/${classItem.id}`,
-        };
-      }
-    );
+    const studentRows = (
+      studentResult.data ?? []
+    ) as unknown as StudentSearchRow[];
 
-    const teacherItems: SearchItem[] = ((teacherResult.data || []) as any[]).map(
-      (teacher) => ({
-        id: `teacher-${teacher.id}`,
-        type: "teacher",
-        title: teacher.name || "未命名小老师",
-        subtitle: "小老师",
-        description: teacher.email
-          ? `邮箱：${teacher.email}`
-          : "暂未填写邮箱。后续可以在小老师管理页补充更多信息。",
-        status: getStatusLabel(teacher.status || "active"),
-        href: `/admin/teachers/${teacher.id}`,
-      })
-    );
+    const lessonRows = (
+      lessonResult.data ?? []
+    ) as unknown as LessonSearchRow[];
 
-    const studentItems: SearchItem[] = ((studentResult.data || []) as any[]).map(
-      (student) => ({
-        id: `student-${student.id}`,
-        type: "student",
-        title: student.name || "未命名学生",
-        subtitle: "学生",
-        description:
-          student.note || "暂未填写学生备注。后续可以在学生详情页查看学习情况。",
-        status: getStatusLabel(student.status || "active"),
-        href: `/admin/students/${student.id}`,
-      })
-    );
+    const studentCommentRows = (
+      studentCommentResult.data ?? []
+    ) as unknown as StudentCommentSearchRow[];
 
-    const lessonItems: SearchItem[] = ((lessonResult.data || []) as any[]).map(
-      (lesson) => ({
-        id: `record-${lesson.id}`,
-        type: "record",
-        title: lesson.lesson_title || "未命名课程记录",
-        subtitle: `课程记录 · ${lesson.lesson_date || "未填写日期"} · ${
-          lesson.duration_minutes || 0
-        } 分钟`,
-        description:
-          lesson.lesson_content_and_feedback ||
-          lesson.next_plan ||
-          lesson.homework ||
-          "暂无课程内容摘要。",
-        status: "已记录",
-        href: `/admin/records/${lesson.id}`,
-      })
-    );
+    const parentMessageRows = (
+      parentMessageResult.data ?? []
+    ) as unknown as ParentMessageSearchRow[];
 
-    const studentMessageItems: SearchItem[] = (
-      (studentCommentResult.data || []) as any[]
-    ).map((comment) => ({
-      id: `student-message-${comment.id}`,
-      type: "student_message",
-      title: `${comment.student_name || "学生"} 的留言`,
-      subtitle: `学生留言 · ${new Date(comment.created_at).toLocaleDateString(
-        "zh-CN"
-      )}`,
-      description: comment.comment || "暂无留言内容。",
-      status: "已收到",
-      href: "/admin/messages",
+    const classItems: SearchItem[] = classRows.map((classItem) => {
+      const teacherNames =
+        classItem.class_teachers
+          ?.map((item) => item.teachers?.name)
+          .filter((name): name is string => Boolean(name)) ?? [];
+
+      const studentNames =
+        classItem.class_students
+          ?.map((item) => item.students?.name)
+          .filter((name): name is string => Boolean(name)) ?? [];
+
+      return {
+        id: `class-${classItem.id}`,
+        type: "class",
+        title: classItem.name || "未命名班级",
+        subtitle: `班级 · ${
+          classItem.cohorts?.name || "未设置届别"
+        } · ${
+          teacherNames.length > 0
+            ? `小老师 ${teacherNames.join("、")}`
+            : "暂未分配小老师"
+        }`,
+        description: `${
+          classItem.school || "暂未填写合作学校"
+        } · ${studentNames.length} 名学生 · 状态：${getStatusLabel(
+          classItem.status
+        )}`,
+        status: getStatusLabel(classItem.status),
+        href: `/admin/classes/${classItem.id}`,
+      };
+    });
+
+    const teacherItems: SearchItem[] = teacherRows.map((teacher) => ({
+      id: `teacher-${teacher.id}`,
+      type: "teacher",
+      title: teacher.name || "未命名小老师",
+      subtitle: "小老师",
+      description: teacher.email
+        ? `邮箱：${teacher.email}`
+        : "暂未填写邮箱。后续可以在小老师管理页补充更多信息。",
+      status: getStatusLabel(teacher.status || "active"),
+      href: `/admin/teachers/${teacher.id}`,
     }));
 
-    const parentMessageItems: SearchItem[] = (
-      (parentMessageResult.data || []) as any[]
-    ).map((messageItem) => ({
-      id: `parent-message-${messageItem.id}`,
-      type: "parent_message",
-      title: `${messageItem.parent_name || "家长"} 的反馈`,
-      subtitle: `家长反馈 · ${
-        messageItem.student_name || "未填写学生"
-      } · ${new Date(messageItem.created_at).toLocaleDateString("zh-CN")}`,
-      description: messageItem.message || "暂无反馈内容。",
-      status: "已收到",
-      href: "/admin/messages",
+    const studentItems: SearchItem[] = studentRows.map((student) => ({
+      id: `student-${student.id}`,
+      type: "student",
+      title: student.name || "未命名学生",
+      subtitle: "学生",
+      description:
+        student.note ||
+        "暂未填写学生备注。后续可以在学生详情页查看学习情况。",
+      status: getStatusLabel(student.status || "active"),
+      href: `/admin/students/${student.id}`,
     }));
+
+    const lessonItems: SearchItem[] = lessonRows.map((lesson) => ({
+      id: `record-${lesson.id}`,
+      type: "record",
+      title: lesson.lesson_title || "未命名课程记录",
+      subtitle: `课程记录 · ${
+        lesson.lesson_date || "未填写日期"
+      } · ${lesson.duration_minutes || 0} 分钟`,
+      description:
+        lesson.lesson_content_and_feedback ||
+        lesson.next_plan ||
+        lesson.homework ||
+        "暂无课程内容摘要。",
+      status: "已记录",
+      href: `/admin/records/${lesson.id}`,
+    }));
+
+    const studentMessageItems: SearchItem[] = studentCommentRows.map(
+      (comment) => ({
+        id: `student-message-${comment.id}`,
+        type: "student_message",
+        title: `${comment.student_name || "学生"} 的留言`,
+        subtitle: `学生留言 · ${new Date(
+          comment.created_at
+        ).toLocaleDateString("zh-CN")}`,
+        description: comment.comment || "暂无留言内容。",
+        status: "已收到",
+        href: "/admin/comments",
+      })
+    );
+
+    const parentMessageItems: SearchItem[] = parentMessageRows.map(
+      (messageItem) => ({
+        id: `parent-message-${messageItem.id}`,
+        type: "parent_message",
+        title: `${messageItem.parent_name || "家长"} 的反馈`,
+        subtitle: `家长反馈 · ${
+          messageItem.student_name || "未填写学生"
+        } · ${new Date(messageItem.created_at).toLocaleDateString(
+          "zh-CN"
+        )}`,
+        description: messageItem.message || "暂无反馈内容。",
+        status: "已收到",
+        href: "/admin/comments",
+      })
+    );
 
     return [
       ...classItems,
@@ -630,41 +788,42 @@ function AdminHomeContent() {
   }
 
   useEffect(() => {
-    let isMounted = true;
+  let isCancelled = false;
 
-    async function loadPage() {
-      setIsLoading(true);
-      setMessage("");
+  async function loadPage() {
+    try {
+      const loadedData = await loadAdminOverviewData();
 
-      try {
-        const loadedData = await loadAdminOverviewData();
+      if (isCancelled) {
+        return;
+      }
 
-        if (!isMounted) return;
+      setPageData(loadedData);
+    } catch (error) {
+      if (isCancelled) {
+        return;
+      }
 
-        setPageData(loadedData);
-      } catch (error) {
-        if (!isMounted) return;
+      console.error(error);
 
-        console.error(error);
-
-        setMessage(
-          error instanceof Error
-            ? `读取管理员首页失败：${error.message}`
-            : "读取管理员首页失败：未知错误。"
-        );
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+      setMessage(
+        error instanceof Error
+          ? `读取管理员首页失败：${error.message}`
+          : "读取管理员首页失败：未知错误。"
+      );
+    } finally {
+      if (!isCancelled) {
+        setIsLoading(false);
       }
     }
+  }
 
-    loadPage();
+  void loadPage();
 
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  return () => {
+    isCancelled = true;
+  };
+}, []);
 
   const { stats, pendingRequests } = pageData;
 

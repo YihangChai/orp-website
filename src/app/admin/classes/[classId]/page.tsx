@@ -446,10 +446,24 @@ function AdminClassDetailContent() {
      6. 派生数据：必须放在所有 return 之前
      ========================= */
 
-  const classData = pageData?.classData || null;
-  const lessons = pageData?.lessons || [];
-  const goals = pageData?.goals || [];
-  const attendanceRecords = pageData?.attendanceRecords || [];
+    const classData = pageData?.classData || null;
+
+  /**
+   * 这里不要直接写 pageData?.lessons || []。
+   * 否则在 pageData 为空时，每次 render 都会创建新的空数组，
+   * ESLint 会认为 useMemo 的依赖可能每次都变化。
+   */
+  const lessons = useMemo(() => {
+    return pageData?.lessons || [];
+  }, [pageData?.lessons]);
+
+  const goals = useMemo(() => {
+    return pageData?.goals || [];
+  }, [pageData?.goals]);
+
+  const attendanceRecords = useMemo(() => {
+    return pageData?.attendanceRecords || [];
+  }, [pageData?.attendanceRecords]);
 
   const teachers = useMemo(() => {
     return (

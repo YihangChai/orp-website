@@ -24,7 +24,7 @@ export type AdminActionRequest = {
   required_approvals: number;
   requested_by: string | null;
   note: string | null;
-  action_payload: Record<string, any> | null;
+  action_payload: Record<string, unknown> | null;
   created_at: string;
   updated_at: string | null;
 };

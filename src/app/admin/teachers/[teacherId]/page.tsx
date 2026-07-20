@@ -27,9 +27,45 @@ type TeacherRecord = {
   created_at: string;
 };
 
+/**
+ * 以下类型描述 Supabase 嵌套关系的真实结构，
+ * 用明确类型替代原来的 any。
+ */
+type RelatedCohort = {
+  id: string;
+  name: string;
+  status: string | null;
+};
+
+type RelatedStudent = {
+  id: string;
+  name: string;
+  status: string | null;
+  grade: string | null;
+};
+
+type ClassStudentRelation = {
+  student_id: string;
+  students: RelatedStudent | RelatedStudent[] | null;
+};
+
+type RelatedClass = {
+  id: string;
+  name: string;
+  school: string | null;
+  subject: string | null;
+  status: string | null;
+  cohort_id: string | null;
+  cohorts: RelatedCohort | RelatedCohort[] | null;
+  class_students:
+    | ClassStudentRelation
+    | ClassStudentRelation[]
+    | null;
+};
+
 type ClassRelation = {
   class_id: string;
-  classes: any;
+  classes: RelatedClass | RelatedClass[] | null;
 };
 
 type ClassSummary = {
@@ -75,12 +111,19 @@ type TeacherDetailData = {
   lessonRecords: LessonRecord[];
 };
 
+/**
+ * Supabase 的嵌套关系有时是对象，有时是数组。
+ * getOne 统一取得一个对象。
+ */
 function getOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
-  if (Array.isArray(value)) return value[0] || null;
+  if (Array.isArray(value)) return value[0] ?? null;
   return value;
 }
 
+/**
+ * getMany 统一把对象、数组或 null 转换为数组。
+ */
 function getMany<T>(value: T | T[] | null | undefined): T[] {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -140,9 +183,11 @@ function getClassStatusLabel(status: string | null | undefined) {
 
 function getClassStatusClassName(status: string | null | undefined) {
   if (status === "active") return "bg-emerald-50 text-emerald-700";
+
   if (status === "archived" || status === "completed") {
     return "bg-stone-100 text-stone-500";
   }
+
   return "bg-amber-50 text-amber-700";
 }
 
@@ -193,6 +238,7 @@ function getRecentFourWeeksCount(lessons: LessonRecord[]) {
 
   const recentLessons = lessons.filter((lesson) => {
     const lessonDate = new Date(lesson.lesson_date);
+
     return lessonDate >= fourWeeksAgo && lessonDate <= today;
   });
 
@@ -302,7 +348,8 @@ function getAttentionLabel({
     return {
       text: "频率偏低",
       className: "bg-amber-50 text-amber-700",
-      description: "这个小老师近 4 周活跃周数偏少，可以结合班级情况判断是否需要跟进。",
+      description:
+        "这个小老师近 4 周活跃周数偏少，可以结合班级情况判断是否需要跟进。",
     };
   }
 
@@ -310,6 +357,117 @@ function getAttentionLabel({
     text: "正常",
     className: "bg-emerald-50 text-emerald-700",
     description: "该小老师目前有课程记录，近期教学活跃情况没有明显异常。",
+  };
+}
+
+/**
+ * 查询并整理老师详情数据。
+ * 这个函数只负责访问数据库并返回数据，不直接修改 React state。
+ */
+async function fetchTeacherDetailData(
+  teacherId: string
+): Promise<TeacherDetailData> {
+  const { data: teacherData, error: teacherError } = await supabase
+    .from("teachers")
+    .select("id, name, email, subject, status, created_at")
+    .eq("id", teacherId)
+    .maybeSingle();
+
+  if (teacherError) {
+    throw new Error(`读取小老师资料失败：${teacherError.message}`);
+  }
+
+  if (!teacherData) {
+    throw new Error(
+      "没有找到这个小老师。可能这个小老师已经被删除，或者链接里的 ID 不正确。"
+    );
+  }
+
+  const teacher = teacherData as TeacherRecord;
+
+  const { data: classRelationsData, error: classRelationError } =
+    await supabase
+      .from("class_teachers")
+      .select(
+        `
+          class_id,
+          classes (
+            id,
+            name,
+            school,
+            subject,
+            status,
+            cohort_id,
+            cohorts (
+              id,
+              name,
+              status
+            ),
+            class_students (
+              student_id,
+              students (
+                id,
+                name,
+                status,
+                grade
+              )
+            )
+          )
+        `
+      )
+      .eq("teacher_id", teacherId);
+
+  if (classRelationError) {
+    throw new Error(`读取班级关系失败：${classRelationError.message}`);
+  }
+
+  const classRelations =
+    (classRelationsData ?? []) as unknown as ClassRelation[];
+
+  const classIds = classRelations
+    .map((relation) => relation.class_id)
+    .filter((classId): classId is string => Boolean(classId));
+
+  const goalRequest =
+    classIds.length > 0
+      ? supabase
+          .from("teaching_goals")
+          .select(
+            "id, class_id, title, description, expected_lessons, status, created_at"
+          )
+          .in("class_id", classIds)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({
+          data: [] as TeachingGoal[],
+          error: null,
+        });
+
+  const lessonRequest = supabase
+    .from("lesson_records")
+    .select(
+      "id, teacher_id, class_id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, teacher_reflection, created_at"
+    )
+    .eq("teacher_id", teacherId)
+    .order("lesson_date", { ascending: false });
+
+  const [goalResult, lessonResult] = await Promise.all([
+    goalRequest,
+    lessonRequest,
+  ]);
+
+  if (goalResult.error) {
+    throw new Error(`读取学习目标失败：${goalResult.error.message}`);
+  }
+
+  if (lessonResult.error) {
+    throw new Error(`读取课程记录失败：${lessonResult.error.message}`);
+  }
+
+  return {
+    teacher,
+    classRelations,
+    teachingGoals: (goalResult.data ?? []) as TeachingGoal[],
+    lessonRecords: (lessonResult.data ?? []) as LessonRecord[],
   };
 }
 
@@ -325,128 +483,62 @@ function TeacherDetailContent() {
   const params = useParams<{ teacherId: string }>();
   const teacherId = params.teacherId;
 
-  const [detailData, setDetailData] = useState<TeacherDetailData | null>(null);
+  const [detailData, setDetailData] =
+    useState<TeacherDetailData | null>(null);
+
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   const [showAllGoals, setShowAllGoals] = useState(false);
   const [showAllLessons, setShowAllLessons] = useState(false);
 
-  async function fetchTeacherDetail() {
-    setIsLoading(true);
-    setMessage("");
+  /**
+   * teacherId 变化时重新读取老师详情。
+   * isLoading 初始值已经是 true，因此 effect 开始时不重复设置。
+   */
+  useEffect(() => {
+    let isCancelled = false;
 
-    try {
-      const { data: teacherData, error: teacherError } = await supabase
-        .from("teachers")
-        .select("id, name, email, subject, status, created_at")
-        .eq("id", teacherId)
-        .maybeSingle();
-
-      if (teacherError) {
-        throw new Error(`读取小老师资料失败：${teacherError.message}`);
-      }
-
-      if (!teacherData) {
-        throw new Error(
-          "没有找到这个小老师。可能这个小老师已经被删除，或者链接里的 ID 不正确。"
-        );
-      }
-
-      const teacher = teacherData as TeacherRecord;
-
-      const { data: classRelationsData, error: classRelationError } =
-        await supabase
-          .from("class_teachers")
-          .select(
-            `
-            class_id,
-            classes (
-              id,
-              name,
-              school,
-              subject,
-              status,
-              cohort_id,
-              cohorts (
-                id,
-                name,
-                status
-              ),
-              class_students (
-                student_id,
-                students (
-                  id,
-                  name,
-                  status,
-                  grade
-                )
-              )
-            )
-          `
-          )
-          .eq("teacher_id", teacherId);
-
-      if (classRelationError) {
-        throw new Error(`读取班级关系失败：${classRelationError.message}`);
-      }
-
-      const classRelations = (classRelationsData || []) as ClassRelation[];
-
-      const classIds = classRelations
-        .map((relation) => relation.class_id)
-        .filter(Boolean);
-
-      let teachingGoals: TeachingGoal[] = [];
-
-      if (classIds.length > 0) {
-        const { data: goalData, error: goalError } = await supabase
-          .from("teaching_goals")
-          .select(
-            "id, class_id, title, description, expected_lessons, status, created_at"
-          )
-          .in("class_id", classIds)
-          .order("created_at", { ascending: false });
-
-        if (goalError) {
-          throw new Error(`读取学习目标失败：${goalError.message}`);
+    async function loadTeacherDetail() {
+      if (!teacherId) {
+        if (!isCancelled) {
+          setMessage("链接中缺少小老师 ID。");
+          setIsLoading(false);
         }
 
-        teachingGoals = (goalData || []) as TeachingGoal[];
+        return;
       }
 
-      const { data: lessonData, error: lessonError } = await supabase
-        .from("lesson_records")
-        .select(
-          "id, teacher_id, class_id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, teacher_reflection, created_at"
-        )
-        .eq("teacher_id", teacherId)
-        .order("lesson_date", { ascending: false });
+      try {
+        const loadedData = await fetchTeacherDetailData(teacherId);
 
-      if (lessonError) {
-        throw new Error(`读取课程记录失败：${lessonError.message}`);
+        if (isCancelled) {
+          return;
+        }
+
+        setDetailData(loadedData);
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "读取小老师详情失败。"
+        );
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
-
-      setDetailData({
-        teacher,
-        classRelations,
-        teachingGoals,
-        lessonRecords: (lessonData || []) as LessonRecord[],
-      });
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "读取小老师详情失败。"
-      );
-    } finally {
-      setIsLoading(false);
     }
-  }
 
-  useEffect(() => {
-    if (teacherId) {
-      fetchTeacherDetail();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadTeacherDetail();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [teacherId]);
 
   const computed = useMemo(() => {
@@ -458,7 +550,7 @@ function TeacherDetailContent() {
     const teacherStatus = teacher.status || "active";
 
     const classSummaries: ClassSummary[] = classRelations.map((relation) => {
-      const classItem = relation.classes;
+      const classItem = getOne(relation.classes);
       const cohort = getOne(classItem?.cohorts);
       const classStudents = getMany(classItem?.class_students);
 
@@ -476,9 +568,10 @@ function TeacherDetailContent() {
     const studentIds = new Set<string>();
 
     classRelations.forEach((relation) => {
-      const classStudents = getMany(relation.classes?.class_students);
+      const classItem = getOne(relation.classes);
+      const classStudents = getMany(classItem?.class_students);
 
-      classStudents.forEach((classStudent: any) => {
+      classStudents.forEach((classStudent) => {
         if (classStudent.student_id) {
           studentIds.add(classStudent.student_id);
         }
@@ -500,7 +593,10 @@ function TeacherDetailContent() {
       (goal) => goal.status === "active" || !goal.status
     ).length;
 
-    const subjectConflict = hasSubjectConflict(teacher.subject, classSummaries);
+    const subjectConflict = hasSubjectConflict(
+      teacher.subject,
+      classSummaries
+    );
 
     const attention = getAttentionLabel({
       status: teacherStatus,
@@ -542,8 +638,12 @@ function TeacherDetailContent() {
         subject: teacher.subject,
         hasSubjectConflict: subjectConflict,
       }),
-      visibleGoals: showAllGoals ? teachingGoals : teachingGoals.slice(0, 3),
-      visibleLessons: showAllLessons ? lessonRecords : lessonRecords.slice(0, 5),
+      visibleGoals: showAllGoals
+        ? teachingGoals
+        : teachingGoals.slice(0, 3),
+      visibleLessons: showAllLessons
+        ? lessonRecords
+        : lessonRecords.slice(0, 5),
     };
   }, [detailData, showAllGoals, showAllLessons]);
 
@@ -551,7 +651,9 @@ function TeacherDetailContent() {
     return (
       <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
         <section className="mx-auto max-w-5xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm">
-          <p className="text-sm text-stone-600">正在读取小老师详情...</p>
+          <p className="text-sm text-stone-600">
+            正在读取小老师详情...
+          </p>
         </section>
       </main>
     );
@@ -717,7 +819,9 @@ function TeacherDetailContent() {
 
         <section className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-            <h2 className="text-xl font-bold text-emerald-950">基本信息</h2>
+            <h2 className="text-xl font-bold text-emerald-950">
+              基本信息
+            </h2>
 
             <div className="mt-5 space-y-4 text-sm">
               <div>
@@ -763,7 +867,9 @@ function TeacherDetailContent() {
           </div>
 
           <div className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-            <h2 className="text-xl font-bold text-emerald-950">负责班级</h2>
+            <h2 className="text-xl font-bold text-emerald-950">
+              负责班级
+            </h2>
 
             {classSummaries.length === 0 ? (
               <p className="mt-5 rounded-2xl bg-red-50 p-5 text-sm leading-7 text-red-700">
@@ -820,7 +926,8 @@ function TeacherDetailContent() {
                       {subjectConflict && (
                         <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
                           学科不一致：小老师为
-                          {getSubjectLabel(teacher.subject)}，班级为
+                          {getSubjectLabel(teacher.subject)}
+                          ，班级为
                           {getSubjectLabel(classSummary.subject)}
                         </p>
                       )}
@@ -842,7 +949,9 @@ function TeacherDetailContent() {
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
             <div>
-              <h2 className="text-xl font-bold text-emerald-950">学习目标</h2>
+              <h2 className="text-xl font-bold text-emerald-950">
+                学习目标
+              </h2>
 
               <p className="mt-2 text-sm leading-7 text-stone-600">
                 这里显示该小老师负责班级下的学习目标。默认显示最近 3
@@ -853,7 +962,7 @@ function TeacherDetailContent() {
             {teachingGoals.length > 3 && (
               <button
                 type="button"
-                onClick={() => setShowAllGoals((prev) => !prev)}
+                onClick={() => setShowAllGoals((previous) => !previous)}
                 className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
               >
                 {showAllGoals
@@ -932,7 +1041,9 @@ function TeacherDetailContent() {
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
             <div>
-              <h2 className="text-xl font-bold text-emerald-950">课程记录</h2>
+              <h2 className="text-xl font-bold text-emerald-950">
+                课程记录
+              </h2>
 
               <p className="mt-2 text-sm leading-7 text-stone-600">
                 这里显示该小老师填写过的课程记录。默认显示最近 5
@@ -943,7 +1054,7 @@ function TeacherDetailContent() {
             {lessonRecords.length > 5 && (
               <button
                 type="button"
-                onClick={() => setShowAllLessons((prev) => !prev)}
+                onClick={() => setShowAllLessons((previous) => !previous)}
                 className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
               >
                 {showAllLessons

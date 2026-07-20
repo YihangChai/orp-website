@@ -2,14 +2,26 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import StudentGuard, { useCurrentStudent } from "@/components/StudentGuard";
-import type { CurrentStudent } from "@/lib/auth";
+import StudentGuard, {
+  useCurrentStudent,
+} from "@/components/StudentGuard";
 
 const STUDENT_ARCHIVED_REVIEW_PATH = "/student/archive-review";
 
-type StudentAccessState = "active" | "withdrawn" | "archived" | "unavailable";
+/**
+ * 使用固定的空数组，避免每次渲染都创建新的 []。
+ * 否则以 goals、records 为依赖的 useMemo 会认为依赖一直在变化。
+ */
+const EMPTY_GOALS: TeachingGoal[] = [];
+const EMPTY_RECORDS: LessonRecord[] = [];
+
+type StudentAccessState =
+  | "active"
+  | "withdrawn"
+  | "archived"
+  | "unavailable";
 
 type StudentRow = {
   id: string;
@@ -30,12 +42,12 @@ type ClassRow = {
   school: string | null;
   status: string;
   subject: string | null;
-  cohorts: CohortRow | null;
+  cohorts: CohortRow | CohortRow[] | null;
 };
 
 type ClassRelation = {
   class_id: string;
-  classes: ClassRow | null;
+  classes: ClassRow | ClassRow[] | null;
 };
 
 type TeachingGoal = {
@@ -71,6 +83,21 @@ type ParentPageData = {
   records: LessonRecord[];
 };
 
+type CurrentStudentIdentity = {
+  id: string;
+  name: string;
+};
+
+/**
+ * Supabase 的嵌套关系有时可能是单个对象，也可能被推断为数组。
+ * 页面这里只需要一个对象，因此统一取第一个。
+ */
+function getOne<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value;
+}
+
 function getSubjectLabel(subject: string | null | undefined) {
   if (subject === "english") return "英语";
   if (subject === "math") return "数学";
@@ -86,76 +113,77 @@ function getStudentAccessState(
   return "unavailable";
 }
 
-function buildStudentClassLink(path: string, classId: string | null) {
+function buildStudentClassLink(
+  path: string,
+  classId: string | null
+) {
   if (!classId) return path;
+
   return `${path}?classId=${encodeURIComponent(classId)}`;
 }
 
-export default function ParentModePage() {
-  return (
-    <StudentGuard>
-      <ParentModeContent />
-    </StudentGuard>
-  );
-}
-
-function ParentModeContent() {
-  const currentStudent = useCurrentStudent();
-  const searchParams = useSearchParams();
-  const classIdFromUrl = searchParams.get("classId") || "";
-
-  const [selectedClassId, setSelectedClassId] = useState(classIdFromUrl);
-  const [pageData, setPageData] = useState<ParentPageData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSubmittingMessage, setIsSubmittingMessage] = useState(false);
-  const [message, setMessage] = useState("");
-
-  async function loadParentPageData(
-    activeStudent: CurrentStudent,
-    requestedClassId: string
-  ): Promise<ParentPageData> {
-    const { data: studentFromSupabase, error: studentError } = await supabase
+/**
+ * 查询家长模式需要的数据。
+ *
+ * 该函数放在组件外，并且只负责：
+ * 1. 查询 Supabase；
+ * 2. 检查错误；
+ * 3. 返回整理后的数据。
+ *
+ * 它不直接调用 setState，因此不会自行触发 React 渲染。
+ */
+async function loadParentPageData(
+  activeStudent: CurrentStudentIdentity,
+  requestedClassId: string
+): Promise<ParentPageData> {
+  const { data: studentFromSupabase, error: studentError } =
+    await supabase
       .from("students")
       .select("id, name, username, status")
       .eq("id", activeStudent.id)
       .maybeSingle();
 
-    if (studentError) {
-      throw new Error(`读取学生资料失败：${studentError.message}`);
-    }
+  if (studentError) {
+    throw new Error(
+      `读取学生资料失败：${studentError.message}`
+    );
+  }
 
-    if (!studentFromSupabase) {
-      throw new Error("没有找到学生资料，请重新登录。");
-    }
+  if (!studentFromSupabase) {
+    throw new Error("没有找到学生资料，请重新登录。");
+  }
 
-    const studentData = studentFromSupabase as StudentRow;
-    const accessState = getStudentAccessState(studentData.status);
+  const studentData = studentFromSupabase as StudentRow;
+  const accessState = getStudentAccessState(studentData.status);
 
-    /**
-     * archived 学生预留逻辑：
-     * - 目前不进入普通家长模式，不允许继续提交家长留言。
-     * - 后续可以在 /student/archive-review 提供历史学习回顾和家长视角总结。
-     */
-    if (accessState === "archived") {
-      return {
-        student: studentData,
-        accessState,
-        classRelations: [],
-        selectedClassRelation: null,
-        selectedClassId: "",
-        goals: [],
-        records: [],
-      };
-    }
+  /**
+   * 归档学生暂时不进入普通家长模式。
+   */
+  if (accessState === "archived") {
+    return {
+      student: studentData,
+      accessState,
+      classRelations: [],
+      selectedClassRelation: null,
+      selectedClassId: "",
+      goals: [],
+      records: [],
+    };
+  }
 
-    if (accessState !== "active") {
-      throw new Error("这个学生账号当前不可用。如有疑问，请联系 ORP 管理员。");
-    }
+  if (accessState !== "active") {
+    throw new Error(
+      "这个学生账号当前不可用。如有疑问，请联系 ORP 管理员。"
+    );
+  }
 
-    const { data: relationFromSupabase, error: relationError } = await supabase
-      .from("class_students")
-      .select(
-        `
+  const {
+    data: relationFromSupabase,
+    error: relationError,
+  } = await supabase
+    .from("class_students")
+    .select(
+      `
         class_id,
         classes (
           id,
@@ -170,149 +198,242 @@ function ParentModeContent() {
           )
         )
       `
-      )
-      .eq("student_id", activeStudent.id);
+    )
+    .eq("student_id", activeStudent.id);
 
-    if (relationError) {
-      throw new Error(`读取班级关系失败：${relationError.message}`);
-    }
-
-    const allRelations = (
-      (relationFromSupabase || []) as unknown as ClassRelation[]
-    ).filter((relation) => Boolean(relation.classes));
-
-    const activeRelations = allRelations.filter((relation) => {
-      const classItem = relation.classes;
-
-      if (!classItem) return false;
-      if (classItem.status === "archived") return false;
-      if (classItem.status === "withdrawn") return false;
-      if (classItem.cohorts?.status === "archived") return false;
-
-      return true;
-    });
-
-    if (activeRelations.length === 0) {
-      throw new Error("没有找到可用班级信息，请联系 ORP 管理员。");
-    }
-
-    const requestedRelation = requestedClassId
-      ? activeRelations.find(
-          (relation) => relation.class_id === requestedClassId
-        )
-      : null;
-
-    const selectedRelation = requestedRelation || activeRelations[0];
-    const activeClassId = selectedRelation.class_id;
-
-    const [goalsResult, recordsResult] = await Promise.all([
-      supabase
-        .from("teaching_goals")
-        .select(
-          "id, title, description, expected_lessons, status, created_at, completed_at"
-        )
-        .eq("class_id", activeClassId)
-        .order("created_at", { ascending: false }),
-
-      supabase
-        .from("lesson_records")
-        .select(
-          "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, created_at"
-        )
-        .eq("class_id", activeClassId)
-        .order("lesson_date", { ascending: false })
-        .order("created_at", { ascending: false }),
-    ]);
-
-    if (goalsResult.error) {
-      throw new Error(`读取学习计划失败：${goalsResult.error.message}`);
-    }
-
-    if (recordsResult.error) {
-      throw new Error(`读取课程记录失败：${recordsResult.error.message}`);
-    }
-
-    return {
-      student: studentData,
-      accessState,
-      classRelations: activeRelations,
-      selectedClassRelation: selectedRelation,
-      selectedClassId: activeClassId,
-      goals: (goalsResult.data || []) as TeachingGoal[],
-      records: (recordsResult.data || []) as LessonRecord[],
-    };
+  if (relationError) {
+    throw new Error(
+      `读取班级关系失败：${relationError.message}`
+    );
   }
 
-  useEffect(() => {
-    if (classIdFromUrl && classIdFromUrl !== selectedClassId) {
-      setSelectedClassId(classIdFromUrl);
-    }
-  }, [classIdFromUrl, selectedClassId]);
+  const allRelations = (
+    (relationFromSupabase ?? []) as unknown as ClassRelation[]
+  )
+    .map((relation) => ({
+      ...relation,
+      classes: getOne(relation.classes),
+    }))
+    .filter(
+      (
+        relation
+      ): relation is ClassRelation & {
+        classes: ClassRow;
+      } => relation.classes !== null
+    );
 
+  const activeRelations = allRelations.filter((relation) => {
+    const classItem = getOne(relation.classes);
+    const cohort = getOne(classItem?.cohorts);
+
+    if (!classItem) return false;
+    if (classItem.status === "archived") return false;
+    if (classItem.status === "withdrawn") return false;
+    if (cohort?.status === "archived") return false;
+
+    return true;
+  });
+
+  if (activeRelations.length === 0) {
+    throw new Error(
+      "没有找到可用班级信息，请联系 ORP 管理员。"
+    );
+  }
+
+  const requestedRelation = requestedClassId
+    ? activeRelations.find(
+        (relation) =>
+          relation.class_id === requestedClassId
+      ) ?? null
+    : null;
+
+  const selectedRelation =
+    requestedRelation ?? activeRelations[0];
+
+  const activeClassId = selectedRelation.class_id;
+
+  const [goalsResult, recordsResult] = await Promise.all([
+    supabase
+      .from("teaching_goals")
+      .select(
+        "id, title, description, expected_lessons, status, created_at, completed_at"
+      )
+      .eq("class_id", activeClassId)
+      .order("created_at", { ascending: false }),
+
+    supabase
+      .from("lesson_records")
+      .select(
+        "id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, created_at"
+      )
+      .eq("class_id", activeClassId)
+      .order("lesson_date", { ascending: false })
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (goalsResult.error) {
+    throw new Error(
+      `读取学习计划失败：${goalsResult.error.message}`
+    );
+  }
+
+  if (recordsResult.error) {
+    throw new Error(
+      `读取课程记录失败：${recordsResult.error.message}`
+    );
+  }
+
+  return {
+    student: studentData,
+    accessState,
+    classRelations: activeRelations,
+    selectedClassRelation: selectedRelation,
+    selectedClassId: activeClassId,
+    goals: (goalsResult.data ?? []) as TeachingGoal[],
+    records: (recordsResult.data ?? []) as LessonRecord[],
+  };
+}
+
+export default function ParentModePage() {
+  return (
+    <StudentGuard>
+      <ParentModeContent />
+    </StudentGuard>
+  );
+}
+
+function ParentModeContent() {
+  const currentStudent = useCurrentStudent();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  /**
+   * URL 是当前班级选择的唯一来源。
+   * 不再同时使用 selectedClassId state 和 URL，避免两套状态互相同步。
+   */
+  const classIdFromUrl =
+    searchParams.get("classId") ?? "";
+
+  const [pageData, setPageData] =
+    useState<ParentPageData | null>(null);
+
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [isSubmittingMessage, setIsSubmittingMessage] =
+    useState(false);
+
+  const [message, setMessage] = useState("");
+
+  /**
+   * 学生 ID、姓名或 URL 中的班级变化时重新读取数据。
+   *
+   * 依赖中不直接放 currentStudent 对象，
+   * 因为对象引用可能在每次渲染时变化。
+   */
   useEffect(() => {
-    let isMounted = true;
+    let isCancelled = false;
 
     async function loadPage() {
-      setIsLoading(true);
-      setMessage("");
-
       try {
-        const requestedClassId = selectedClassId || classIdFromUrl;
+        const loadedPageData =
+          await loadParentPageData(
+            {
+              id: currentStudent.id,
+              name: currentStudent.name,
+            },
+            classIdFromUrl
+          );
 
-        const loadedPageData = await loadParentPageData(
-          currentStudent,
-          requestedClassId
-        );
-
-        if (!isMounted) return;
+        if (isCancelled) {
+          return;
+        }
 
         setPageData(loadedPageData);
 
+        /**
+         * URL 没有 classId，或者 URL 中的班级无效时，
+         * 将系统实际选择的班级写入 URL。
+         *
+         * router.replace 不会新增浏览器历史记录。
+         */
         if (
           loadedPageData.accessState === "active" &&
-          selectedClassId !== loadedPageData.selectedClassId
+          loadedPageData.selectedClassId &&
+          loadedPageData.selectedClassId !== classIdFromUrl
         ) {
-          setSelectedClassId(loadedPageData.selectedClassId);
+          router.replace(
+            `/student/parent?classId=${encodeURIComponent(
+              loadedPageData.selectedClassId
+            )}`
+          );
         }
       } catch (error) {
-        if (!isMounted) return;
+        if (isCancelled) {
+          return;
+        }
 
-        const errorMessage =
-          error instanceof Error ? error.message : "读取家长模式失败。";
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "读取家长模式失败。"
+        );
 
-        setMessage(errorMessage);
         setPageData(null);
       } finally {
-        if (isMounted) {
+        if (!isCancelled) {
           setIsLoading(false);
         }
       }
     }
 
-    loadPage();
+    void loadPage();
 
     return () => {
-      isMounted = false;
+      isCancelled = true;
     };
-  }, [currentStudent, selectedClassId, classIdFromUrl]);
+  }, [
+    currentStudent.id,
+    currentStudent.name,
+    classIdFromUrl,
+    router,
+  ]);
 
+  /**
+   * 切换班级时只修改 URL。
+   * URL 改变后，上面的 effect 会自动加载对应班级数据。
+   */
   function handleSelectClass(nextClassId: string) {
-    setSelectedClassId(nextClassId);
+    if (!nextClassId) return;
+
     setMessage("");
+    setIsLoading(true);
+
+    router.replace(
+      `/student/parent?classId=${encodeURIComponent(
+        nextClassId
+      )}`
+    );
   }
 
-  async function submitParentMessage(event: FormEvent<HTMLFormElement>) {
+  async function submitParentMessage(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
 
     const form = event.currentTarget;
 
-    if (!pageData || pageData.accessState !== "active") {
+    if (
+      !pageData ||
+      pageData.accessState !== "active"
+    ) {
       setMessage("当前账号不能提交家长留言。");
       return;
     }
 
     if (!pageData.selectedClassId) {
-      setMessage("班级信息尚未加载完成，请稍后再留言。");
+      setMessage(
+        "班级信息尚未加载完成，请稍后再留言。"
+      );
       return;
     }
 
@@ -322,65 +443,110 @@ function ParentModeContent() {
     try {
       const formData = new FormData(form);
 
-      const parentName = String(formData.get("parent_name") || "").trim();
-      const parentMessage = String(formData.get("message") || "").trim();
+      const parentName = String(
+        formData.get("parent_name") ?? ""
+      ).trim();
+
+      const parentMessage = String(
+        formData.get("message") ?? ""
+      ).trim();
 
       if (!parentMessage) {
         setMessage("留言内容不能为空。");
         return;
       }
 
-      const { error } = await supabase.from("parent_messages").insert({
-        student_id: currentStudent.id,
-        student_name: pageData.student.name,
-        parent_name: parentName || `${pageData.student.name} 家长`,
-        class_id: pageData.selectedClassId,
-        message: parentMessage,
-      });
+      const { error } = await supabase
+        .from("parent_messages")
+        .insert({
+          student_id: currentStudent.id,
+          student_name: pageData.student.name,
+          parent_name:
+            parentName ||
+            `${pageData.student.name} 家长`,
+          class_id: pageData.selectedClassId,
+          message: parentMessage,
+        });
 
       if (error) {
-        throw new Error(`提交留言失败：${error.message}`);
+        throw new Error(
+          `提交留言失败：${error.message}`
+        );
       }
 
       form.reset();
       setMessage("留言已提交，感谢你的反馈。");
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "提交留言失败，请稍后再试。";
-
-      setMessage(errorMessage);
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "提交留言失败，请稍后再试。"
+      );
     } finally {
       setIsSubmittingMessage(false);
     }
   }
 
-  const goals = pageData?.goals || [];
-  const records = pageData?.records || [];
-  const studentName = pageData?.student.name || currentStudent.name;
+  /**
+   * 使用模块级固定空数组。
+   * 不使用 pageData?.goals || []，因为后者会在每次渲染时创建新数组。
+   */
+  const goals = pageData?.goals ?? EMPTY_GOALS;
+  const records = pageData?.records ?? EMPTY_RECORDS;
 
-  const selectedClass = pageData?.selectedClassRelation?.classes || null;
-  const currentClassId = pageData?.selectedClassId || selectedClassId || "";
-  const currentClassName = selectedClass?.name || "当前班级";
-  const currentSubjectName = getSubjectLabel(selectedClass?.subject);
-  const hasMultipleClasses = (pageData?.classRelations.length || 0) > 1;
+  const studentName =
+    pageData?.student.name ?? currentStudent.name;
 
-  const studentHomeLink = buildStudentClassLink("/student", currentClassId);
-  const lessonsLink = buildStudentClassLink("/student/lessons", currentClassId);
+  const selectedClassRelation =
+    pageData?.selectedClassRelation ?? null;
+
+  const selectedClass = getOne(
+    selectedClassRelation?.classes
+  );
+
+  const currentClassId =
+    pageData?.selectedClassId ?? classIdFromUrl;
+
+  const currentClassName =
+    selectedClass?.name ?? "当前班级";
+
+  const currentSubjectName = getSubjectLabel(
+    selectedClass?.subject
+  );
+
+  const hasMultipleClasses =
+    (pageData?.classRelations.length ?? 0) > 1;
+
+  const studentHomeLink = buildStudentClassLink(
+    "/student",
+    currentClassId
+  );
+
+  const lessonsLink = buildStudentClassLink(
+    "/student/lessons",
+    currentClassId
+  );
 
   const activeGoals = useMemo(() => {
-    return goals.filter((goal) => goal.status === "active");
+    return goals.filter(
+      (goal) => goal.status === "active"
+    );
   }, [goals]);
 
   const completedGoals = useMemo(() => {
-    return goals.filter((goal) => goal.status === "completed");
+    return goals.filter(
+      (goal) => goal.status === "completed"
+    );
   }, [goals]);
 
   const totalLessons = records.length;
 
   const totalMinutes = useMemo(() => {
-    return records.reduce((sum, record) => {
-      return sum + (record.duration_minutes || 0);
-    }, 0);
+    return records.reduce(
+      (sum, record) =>
+        sum + (record.duration_minutes || 0),
+      0
+    );
   }, [records]);
 
   const totalHours = Math.floor(totalMinutes / 60);
@@ -394,14 +560,18 @@ function ParentModeContent() {
     records.forEach((record) => {
       if (!record.goal_id) return;
 
-      const currentCount = map.get(record.goal_id) || 0;
+      const currentCount =
+        map.get(record.goal_id) ?? 0;
+
       map.set(record.goal_id, currentCount + 1);
     });
 
     return map;
   }, [records]);
 
-  const learnedGoalTitles = goals.map((goal) => goal.title);
+  const learnedGoalTitles = useMemo(() => {
+    return goals.map((goal) => goal.title);
+  }, [goals]);
 
   const learnedGoalSummary =
     learnedGoalTitles.length > 0
@@ -412,7 +582,9 @@ function ParentModeContent() {
     return (
       <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
         <section className="mx-auto max-w-5xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm">
-          <p className="text-sm text-stone-600">正在读取家长模式...</p>
+          <p className="text-sm text-stone-600">
+            正在读取家长模式...
+          </p>
         </section>
       </main>
     );
@@ -490,24 +662,44 @@ function ParentModeContent() {
             </p>
 
             <p className="mt-2 text-sm leading-7 text-stone-600">
-              这个学生同时参加了多个 ORP 班级。切换班级后，家长模式中的学习概况、课程记录和留言绑定班级会跟随切换。
+              这个学生同时参加了多个 ORP
+              班级。切换班级后，家长模式中的学习概况、课程记录和留言绑定班级会跟随切换。
             </p>
 
             <select
               value={currentClassId}
-              onChange={(event) => handleSelectClass(event.target.value)}
+              onChange={(event) =>
+                handleSelectClass(event.target.value)
+              }
               className="mt-4 w-full rounded-2xl border border-emerald-100 bg-[#fffdf4] px-4 py-3 text-sm font-semibold text-emerald-950 outline-none transition focus:border-emerald-500 focus:bg-white"
             >
               {pageData.classRelations.map((relation) => {
-                const classItem = relation.classes;
-                const className = classItem?.name || "未命名班级";
-                const subjectName = getSubjectLabel(classItem?.subject);
-                const cohortName = classItem?.cohorts?.name || "";
+                const classItem = getOne(
+                  relation.classes
+                );
+
+                const cohort = getOne(
+                  classItem?.cohorts
+                );
+
+                const className =
+                  classItem?.name ?? "未命名班级";
+
+                const subjectName =
+                  getSubjectLabel(classItem?.subject);
+
+                const cohortName =
+                  cohort?.name ?? "";
 
                 return (
-                  <option key={relation.class_id} value={relation.class_id}>
+                  <option
+                    key={relation.class_id}
+                    value={relation.class_id}
+                  >
                     {className} · {subjectName}
-                    {cohortName ? ` · ${cohortName}` : ""}
+                    {cohortName
+                      ? ` · ${cohortName}`
+                      : ""}
                   </option>
                 );
               })}
@@ -517,7 +709,8 @@ function ParentModeContent() {
 
         <section className="mt-6 rounded-[2rem] bg-[#2f5d50] px-6 py-8 text-white shadow-sm md:px-8">
           <p className="text-sm font-semibold text-emerald-100">
-            当前班级：{currentClassName} · {currentSubjectName}
+            当前班级：{currentClassName} ·{" "}
+            {currentSubjectName}
           </p>
 
           <h1 className="mt-3 text-3xl font-bold">
@@ -525,7 +718,8 @@ function ParentModeContent() {
           </h1>
 
           <p className="mt-4 max-w-3xl leading-8 text-emerald-50">
-            这里可以查看 {studentName} 在当前班级最近的学习情况、课程记录和学习计划。
+            这里可以查看 {studentName}{" "}
+            在当前班级最近的学习情况、课程记录和学习计划。
           </p>
         </section>
 
@@ -539,43 +733,64 @@ function ParentModeContent() {
             <span className="font-semibold text-emerald-800">
               {learnedGoalSummary}
             </span>
-            {learnedGoalTitles.length > 3 && " 等学习内容"}。
+            {learnedGoalTitles.length > 3 &&
+              " 等学习内容"}
+            。
           </p>
 
           <div className="mt-5 grid gap-4 md:grid-cols-4">
             <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4">
-              <p className="text-sm text-stone-500">累计上课</p>
+              <p className="text-sm text-stone-500">
+                累计上课
+              </p>
               <p className="mt-1 text-3xl font-bold text-emerald-950">
                 {totalLessons}
               </p>
-              <p className="mt-1 text-sm text-stone-500">节课</p>
+              <p className="mt-1 text-sm text-stone-500">
+                节课
+              </p>
             </div>
 
             <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4">
-              <p className="text-sm text-stone-500">累计学习时长</p>
+              <p className="text-sm text-stone-500">
+                累计学习时长
+              </p>
               <p className="mt-1 text-3xl font-bold text-emerald-950">
                 {totalHours}
-                <span className="ml-1 text-lg">小时</span>
+                <span className="ml-1 text-lg">
+                  小时
+                </span>
+
                 {remainingMinutes > 0 && (
-                  <span className="ml-1 text-lg">{remainingMinutes}分钟</span>
+                  <span className="ml-1 text-lg">
+                    {remainingMinutes}分钟
+                  </span>
                 )}
               </p>
             </div>
 
             <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4">
-              <p className="text-sm text-stone-500">正在学习</p>
+              <p className="text-sm text-stone-500">
+                正在学习
+              </p>
               <p className="mt-1 text-3xl font-bold text-emerald-950">
                 {activeGoals.length}
               </p>
-              <p className="mt-1 text-sm text-stone-500">个学习计划</p>
+              <p className="mt-1 text-sm text-stone-500">
+                个学习计划
+              </p>
             </div>
 
             <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4">
-              <p className="text-sm text-stone-500">已经完成</p>
+              <p className="text-sm text-stone-500">
+                已经完成
+              </p>
               <p className="mt-1 text-3xl font-bold text-emerald-950">
                 {completedGoals.length}
               </p>
-              <p className="mt-1 text-sm text-stone-500">段学习旅程</p>
+              <p className="mt-1 text-sm text-stone-500">
+                段学习旅程
+              </p>
             </div>
           </div>
         </section>
@@ -603,7 +818,9 @@ function ParentModeContent() {
                       最近学了什么
                     </p>
                     <p className="mt-2 text-sm leading-7 text-stone-700">
-                      {latestRecord.lesson_content_and_feedback}
+                      {
+                        latestRecord.lesson_content_and_feedback
+                      }
                     </p>
                   </div>
 
@@ -638,7 +855,9 @@ function ParentModeContent() {
           </div>
 
           <div className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-            <h2 className="text-xl font-bold text-emerald-950">学习计划</h2>
+            <h2 className="text-xl font-bold text-emerald-950">
+              学习计划
+            </h2>
 
             <p className="mt-2 text-sm leading-7 text-stone-600">
               这里显示孩子在当前班级正在推进或已经完成的学习目标。
@@ -651,20 +870,26 @@ function ParentModeContent() {
                 </p>
               ) : (
                 goals.slice(0, 5).map((goal) => {
-                  const completedLessons = goalProgressMap.get(goal.id) || 0;
-                  const expectedLessons = goal.expected_lessons || 0;
+                  const completedLessons =
+                    goalProgressMap.get(goal.id) ?? 0;
+
+                  const expectedLessons =
+                    goal.expected_lessons ?? 0;
 
                   const progressPercent =
                     expectedLessons > 0
                       ? Math.min(
                           100,
                           Math.round(
-                            (completedLessons / expectedLessons) * 100
+                            (completedLessons /
+                              expectedLessons) *
+                              100
                           )
                         )
                       : 0;
 
-                  const isCompleted = goal.status === "completed";
+                  const isCompleted =
+                    goal.status === "completed";
 
                   return (
                     <article
@@ -685,7 +910,9 @@ function ParentModeContent() {
                                   : "bg-emerald-50 text-emerald-700"
                               }`}
                             >
-                              {isCompleted ? "已完成" : "进行中"}
+                              {isCompleted
+                                ? "已完成"
+                                : "进行中"}
                             </span>
                           </div>
 
@@ -710,7 +937,9 @@ function ParentModeContent() {
                         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-emerald-100">
                           <div
                             className="h-full rounded-full bg-[#2f5d50]"
-                            style={{ width: `${progressPercent}%` }}
+                            style={{
+                              width: `${progressPercent}%`,
+                            }}
                           />
                         </div>
                       )}
@@ -736,8 +965,12 @@ function ParentModeContent() {
               </div>
 
               <div className="w-fit rounded-full border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-800 group-open:bg-emerald-50">
-                <span className="group-open:hidden">展开查看</span>
-                <span className="hidden group-open:inline">收起记录</span>
+                <span className="group-open:hidden">
+                  展开查看
+                </span>
+                <span className="hidden group-open:inline">
+                  收起记录
+                </span>
               </div>
             </div>
           </summary>
@@ -767,7 +1000,9 @@ function ParentModeContent() {
                           </h3>
 
                           <p className="mt-1 line-clamp-2 text-sm leading-6 text-stone-600">
-                            {record.lesson_content_and_feedback}
+                            {
+                              record.lesson_content_and_feedback
+                            }
                           </p>
                         </div>
 
@@ -789,7 +1024,9 @@ function ParentModeContent() {
                             课程内容
                           </p>
                           <p className="mt-2 text-sm leading-7 text-stone-700">
-                            {record.lesson_content_and_feedback}
+                            {
+                              record.lesson_content_and_feedback
+                            }
                           </p>
                         </div>
 
@@ -840,13 +1077,19 @@ function ParentModeContent() {
         </details>
 
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <h2 className="text-xl font-bold text-emerald-950">给 ORP 留言</h2>
+          <h2 className="text-xl font-bold text-emerald-950">
+            给 ORP 留言
+          </h2>
 
           <p className="mt-2 text-sm leading-7 text-stone-600">
-            如果家长希望反馈孩子在当前班级的学习情况、课程时间安排、上课体验或其他建议，欢迎在这里留下一句话。优秀留言可能会被发布在 ORP 网站首页。
+            如果家长希望反馈孩子在当前班级的学习情况、课程时间安排、上课体验或其他建议，欢迎在这里留下一句话。优秀留言可能会被发布在
+            ORP 网站首页。
           </p>
 
-          <form onSubmit={submitParentMessage} className="mt-5 space-y-4">
+          <form
+            onSubmit={submitParentMessage}
+            className="mt-5 space-y-4"
+          >
             <div>
               <label className="text-sm font-semibold text-stone-700">
                 家长称呼
@@ -877,7 +1120,9 @@ function ParentModeContent() {
               disabled={isSubmittingMessage}
               className="rounded-full bg-[#2f5d50] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSubmittingMessage ? "提交中..." : "提交留言"}
+              {isSubmittingMessage
+                ? "提交中..."
+                : "提交留言"}
             </button>
           </form>
         </section>

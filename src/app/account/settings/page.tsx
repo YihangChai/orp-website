@@ -11,6 +11,62 @@ type CurrentUserInfo = {
   homeHref: string;
 };
 
+type RoleInfo = {
+  roleLabel: string;
+  homeHref: string;
+};
+
+/**
+ * 账号设置页需要根据当前 auth_user_id 判断用户角色。
+ * 这个函数不依赖组件状态，所以放在组件外面，避免 useEffect 里调用时出现
+ * “Cannot access variable before it is declared” 的 lint error。
+ */
+async function getRoleInfo(authUserId: string): Promise<RoleInfo> {
+  const { data: admin } = await supabase
+    .from("admins")
+    .select("id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+
+  if (admin) {
+    return {
+      roleLabel: "管理员",
+      homeHref: "/admin",
+    };
+  }
+
+  const { data: teacher } = await supabase
+    .from("teachers")
+    .select("id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+
+  if (teacher) {
+    return {
+      roleLabel: "小老师",
+      homeHref: "/teacher",
+    };
+  }
+
+  const { data: student } = await supabase
+    .from("students")
+    .select("id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+
+  if (student) {
+    return {
+      roleLabel: "学生",
+      homeHref: "/student",
+    };
+  }
+
+  return {
+    roleLabel: "未知角色",
+    homeHref: "/",
+  };
+}
+
 export default function AccountSettingsPage() {
   const router = useRouter();
 
@@ -57,52 +113,6 @@ export default function AccountSettingsPage() {
 
     loadCurrentUser();
   }, [router]);
-
-  async function getRoleInfo(authUserId: string) {
-    const { data: admin } = await supabase
-      .from("admins")
-      .select("id")
-      .eq("auth_user_id", authUserId)
-      .maybeSingle();
-
-    if (admin) {
-      return {
-        roleLabel: "管理员",
-        homeHref: "/admin",
-      };
-    }
-
-    const { data: teacher } = await supabase
-      .from("teachers")
-      .select("id")
-      .eq("auth_user_id", authUserId)
-      .maybeSingle();
-
-    if (teacher) {
-      return {
-        roleLabel: "小老师",
-        homeHref: "/teacher",
-      };
-    }
-
-    const { data: student } = await supabase
-      .from("students")
-      .select("id")
-      .eq("auth_user_id", authUserId)
-      .maybeSingle();
-
-    if (student) {
-      return {
-        roleLabel: "学生",
-        homeHref: "/student",
-      };
-    }
-
-    return {
-      roleLabel: "未知角色",
-      homeHref: "/",
-    };
-  }
 
   async function handleChangePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -203,7 +213,6 @@ export default function AccountSettingsPage() {
             {errorMessage}
           </div>
         )}
-
 
         <section className="mt-6 rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-sm md:p-7">
           <div>

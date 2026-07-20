@@ -173,6 +173,141 @@ function ProgressBar({
   );
 }
 
+async function fetchOptionalTable<T>(
+  tableName: string,
+  selectQuery: string
+): Promise<T[]> {
+  const { data, error } = await supabase
+    .from(tableName)
+    .select(selectQuery)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.warn(`Optional statistics table failed: ${tableName}`, error);
+    return [];
+  }
+
+  return (data ?? []) as T[];
+}
+
+async function fetchStatisticsData(): Promise<StatisticsData> {
+  const [
+    cohortResult,
+    classResult,
+    studentResult,
+    teacherResult,
+    classStudentResult,
+    classTeacherResult,
+    lessonResult,
+    attendanceResult,
+    goalResult,
+    studentComments,
+    parentMessages,
+  ] = await Promise.all([
+    supabase
+      .from("cohorts")
+      .select("id, name, status, created_at")
+      .order("created_at", { ascending: false }),
+
+    supabase
+      .from("classes")
+      .select("id, name, school, status, cohort_id"),
+
+    supabase
+      .from("students")
+      .select("id, status"),
+
+    supabase
+      .from("teachers")
+      .select("id, status"),
+
+    supabase
+      .from("class_students")
+      .select("class_id, student_id"),
+
+    supabase
+      .from("class_teachers")
+      .select("class_id, teacher_id"),
+
+    supabase
+      .from("lesson_records")
+      .select("id, class_id, lesson_date, duration_minutes")
+      .order("lesson_date", { ascending: false }),
+
+    supabase
+      .from("lesson_attendance")
+      .select("student_id, lesson_record_id, is_present"),
+
+    supabase
+      .from("teaching_goals")
+      .select("id, class_id, status"),
+
+    fetchOptionalTable<StudentCommentRow>(
+      "student_lesson_comments",
+      "id, created_at"
+    ),
+
+    fetchOptionalTable<ParentMessageRow>(
+      "parent_messages",
+      "id, created_at"
+    ),
+  ]);
+
+  if (cohortResult.error) {
+    throw new Error(`读取届别失败：${cohortResult.error.message}`);
+  }
+
+  if (classResult.error) {
+    throw new Error(`读取班级失败：${classResult.error.message}`);
+  }
+
+  if (studentResult.error) {
+    throw new Error(`读取学生失败：${studentResult.error.message}`);
+  }
+
+  if (teacherResult.error) {
+    throw new Error(`读取小老师失败：${teacherResult.error.message}`);
+  }
+
+  if (classStudentResult.error) {
+    throw new Error(
+      `读取学生班级关系失败：${classStudentResult.error.message}`
+    );
+  }
+
+  if (classTeacherResult.error) {
+    throw new Error(
+      `读取小老师班级关系失败：${classTeacherResult.error.message}`
+    );
+  }
+
+  if (lessonResult.error) {
+    throw new Error(`读取课程记录失败：${lessonResult.error.message}`);
+  }
+
+  if (attendanceResult.error) {
+    throw new Error(`读取出勤记录失败：${attendanceResult.error.message}`);
+  }
+
+  if (goalResult.error) {
+    throw new Error(`读取学习目标失败：${goalResult.error.message}`);
+  }
+
+  return {
+    cohorts: (cohortResult.data ?? []) as CohortRow[],
+    classes: (classResult.data ?? []) as ClassRow[],
+    students: (studentResult.data ?? []) as StudentRow[],
+    teachers: (teacherResult.data ?? []) as TeacherRow[],
+    classStudents: (classStudentResult.data ?? []) as ClassStudentRow[],
+    classTeachers: (classTeacherResult.data ?? []) as ClassTeacherRow[],
+    lessons: (lessonResult.data ?? []) as LessonRecordRow[],
+    attendance: (attendanceResult.data ?? []) as AttendanceRow[],
+    goals: (goalResult.data ?? []) as TeachingGoalRow[],
+    studentComments,
+    parentMessages,
+  };
+}
+
 export default function AdminStatisticsPage() {
   return (
     <AdminGuard>
@@ -186,133 +321,40 @@ function AdminStatisticsContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  async function fetchOptionalTable<T>(
-    tableName: string,
-    selectQuery: string
-  ): Promise<T[]> {
-    const { data, error } = await supabase
-      .from(tableName)
-      .select(selectQuery)
-      .order("created_at", { ascending: false });
 
-    if (error) {
-      console.warn(`Optional statistics table failed: ${tableName}`, error);
-      return [];
-    }
-
-    return (data || []) as T[];
-  }
-
-  async function fetchStatistics() {
-    setIsLoading(true);
-    setMessage("");
-
-    try {
-      const { data: cohortData, error: cohortError } = await supabase
-        .from("cohorts")
-        .select("id, name, status, created_at")
-        .order("created_at", { ascending: false });
-
-      if (cohortError) {
-        throw new Error(`读取届别失败：${cohortError.message}`);
-      }
-
-      const { data: classData, error: classError } = await supabase
-        .from("classes")
-        .select("id, name, school, status, cohort_id");
-
-      if (classError) {
-        throw new Error(`读取班级失败：${classError.message}`);
-      }
-
-      const { data: studentData, error: studentError } = await supabase
-        .from("students")
-        .select("id, status");
-
-      if (studentError) {
-        throw new Error(`读取学生失败：${studentError.message}`);
-      }
-
-      const { data: teacherData, error: teacherError } = await supabase
-        .from("teachers")
-        .select("id, status");
-
-      if (teacherError) {
-        throw new Error(`读取小老师失败：${teacherError.message}`);
-      }
-
-      const { data: classStudentData, error: classStudentError } =
-        await supabase.from("class_students").select("class_id, student_id");
-
-      if (classStudentError) {
-        throw new Error(`读取学生班级关系失败：${classStudentError.message}`);
-      }
-
-      const { data: classTeacherData, error: classTeacherError } =
-        await supabase.from("class_teachers").select("class_id, teacher_id");
-
-      if (classTeacherError) {
-        throw new Error(`读取小老师班级关系失败：${classTeacherError.message}`);
-      }
-
-      const { data: lessonData, error: lessonError } = await supabase
-        .from("lesson_records")
-        .select("id, class_id, lesson_date, duration_minutes")
-        .order("lesson_date", { ascending: false });
-
-      if (lessonError) {
-        throw new Error(`读取课程记录失败：${lessonError.message}`);
-      }
-
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from("lesson_attendance")
-        .select("student_id, lesson_record_id, is_present");
-
-      if (attendanceError) {
-        throw new Error(`读取出勤记录失败：${attendanceError.message}`);
-      }
-
-      const { data: goalData, error: goalError } = await supabase
-        .from("teaching_goals")
-        .select("id, class_id, status");
-
-      if (goalError) {
-        throw new Error(`读取学习目标失败：${goalError.message}`);
-      }
-
-      const studentComments =
-        await fetchOptionalTable<StudentCommentRow>(
-          "student_lesson_comments",
-          "id, created_at"
-        );
-
-      const parentMessages = await fetchOptionalTable<ParentMessageRow>(
-        "parent_messages",
-        "id, created_at"
-      );
-
-      setData({
-        cohorts: (cohortData || []) as CohortRow[],
-        classes: (classData || []) as ClassRow[],
-        students: (studentData || []) as StudentRow[],
-        teachers: (teacherData || []) as TeacherRow[],
-        classStudents: (classStudentData || []) as ClassStudentRow[],
-        classTeachers: (classTeacherData || []) as ClassTeacherRow[],
-        lessons: (lessonData || []) as LessonRecordRow[],
-        attendance: (attendanceData || []) as AttendanceRow[],
-        goals: (goalData || []) as TeachingGoalRow[],
-        studentComments,
-        parentMessages,
-      });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "读取统计数据失败。");
-    } finally {
-      setIsLoading(false);
-    }
-  }
 
   useEffect(() => {
-    fetchStatistics();
+    let isCancelled = false;
+
+    async function loadStatistics() {
+      try {
+        const loadedData = await fetchStatisticsData();
+
+        if (isCancelled) {
+          return;
+        }
+
+        setData(loadedData);
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        setMessage(
+          error instanceof Error ? error.message : "读取统计数据失败。"
+        );
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadStatistics();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const statistics = useMemo(() => {
@@ -619,7 +661,7 @@ function AdminStatisticsContent() {
               </div>
 
               <p className="mt-5 text-xs leading-6 text-stone-500">
-                不能最为最终评价标准，仅供参考
+                仅供参考
               </p>
             </div>
           </div>
@@ -740,7 +782,7 @@ function AdminStatisticsContent() {
                 </p>
 
                 <Link
-                  href="/admin/messages"
+                  href="/admin/comments"
                   className="mt-4 inline-block rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
                 >
                   去留言中心

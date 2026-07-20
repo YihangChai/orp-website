@@ -46,11 +46,15 @@ type ParentMessageRow = {
 
 function getSourceLabel(source: MessageSource) {
   if (source === "student") return "学生留言";
+
   return "家长/老师留言";
 }
 
 function getSourceClassName(source: MessageSource) {
-  if (source === "student") return "bg-emerald-50 text-emerald-700";
+  if (source === "student") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
   return "bg-amber-50 text-amber-700";
 }
 
@@ -60,7 +64,69 @@ function formatDate(dateString: string) {
 
 function truncateText(text: string, maxLength: number) {
   if (text.length <= maxLength) return text;
+
   return `${text.slice(0, maxLength)}...`;
+}
+
+async function fetchMessages(): Promise<UnifiedMessage[]> {
+  const [
+    { data: studentCommentData, error: studentCommentError },
+    { data: parentMessageData, error: parentMessageError },
+  ] = await Promise.all([
+    supabase
+      .from("student_lesson_comments")
+      .select(
+        "id, lesson_record_id, student_id, student_name, comment, created_at"
+      )
+      .order("created_at", { ascending: false }),
+
+    supabase
+      .from("parent_messages")
+      .select(
+        "id, student_id, student_name, parent_name, message, created_at"
+      )
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (studentCommentError) {
+    throw new Error(`读取学生留言失败：${studentCommentError.message}`);
+  }
+
+  if (parentMessageError) {
+    throw new Error(`读取家长/老师留言失败：${parentMessageError.message}`);
+  }
+
+  const studentMessages: UnifiedMessage[] = (
+    (studentCommentData ?? []) as StudentLessonCommentRow[]
+  ).map((item) => ({
+    id: item.id,
+    source: "student",
+    authorName: item.student_name || "学生",
+    studentId: item.student_id,
+    studentName: item.student_name,
+    lessonRecordId: item.lesson_record_id,
+    content: item.comment,
+    createdAt: item.created_at,
+  }));
+
+  const parentMessages: UnifiedMessage[] = (
+    (parentMessageData ?? []) as ParentMessageRow[]
+  ).map((item) => ({
+    id: item.id,
+    source: "parent",
+    authorName: item.parent_name || item.student_name || "未署名",
+    studentId: item.student_id,
+    studentName: item.student_name,
+    lessonRecordId: null,
+    content: item.message,
+    createdAt: item.created_at,
+  }));
+
+  return [...studentMessages, ...parentMessages].sort(
+    (firstMessage, secondMessage) =>
+      new Date(secondMessage.createdAt).getTime() -
+      new Date(firstMessage.createdAt).getTime()
+  );
 }
 
 export default function AdminMessagesPage() {
@@ -73,84 +139,51 @@ export default function AdminMessagesPage() {
 
 function AdminMessagesContent() {
   const [messages, setMessages] = useState<UnifiedMessage[]>([]);
-  const [selectedSource, setSelectedSource] = useState<"all" | MessageSource>(
-    "all"
-  );
+
+  const [selectedSource, setSelectedSource] = useState<
+    "all" | MessageSource
+  >("all");
+
   const [keyword, setKeyword] = useState("");
+
   const [selectedMessage, setSelectedMessage] =
     useState<UnifiedMessage | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  async function fetchMessages() {
-    setIsLoading(true);
-    setMessage("");
-
-    try {
-      const { data: studentCommentData, error: studentCommentError } =
-        await supabase
-          .from("student_lesson_comments")
-          .select(
-            "id, lesson_record_id, student_id, student_name, comment, created_at"
-          )
-          .order("created_at", { ascending: false });
-
-      if (studentCommentError) {
-        throw new Error(`读取学生留言失败：${studentCommentError.message}`);
-      }
-
-      const { data: parentMessageData, error: parentMessageError } =
-        await supabase
-          .from("parent_messages")
-          .select("id, student_id, student_name, parent_name, message, created_at")
-          .order("created_at", { ascending: false });
-
-      if (parentMessageError) {
-        throw new Error(`读取家长/老师留言失败：${parentMessageError.message}`);
-      }
-
-      const studentMessages: UnifiedMessage[] = (
-        (studentCommentData || []) as StudentLessonCommentRow[]
-      ).map((item) => ({
-        id: item.id,
-        source: "student",
-        authorName: item.student_name || "学生",
-        studentId: item.student_id,
-        studentName: item.student_name,
-        lessonRecordId: item.lesson_record_id,
-        content: item.comment,
-        createdAt: item.created_at,
-      }));
-
-      const parentMessages: UnifiedMessage[] = (
-        (parentMessageData || []) as ParentMessageRow[]
-      ).map((item) => ({
-        id: item.id,
-        source: "parent",
-        authorName: item.parent_name || item.student_name || "未署名",
-        studentId: item.student_id,
-        studentName: item.student_name,
-        lessonRecordId: null,
-        content: item.message,
-        createdAt: item.created_at,
-      }));
-
-      const allMessages = [...studentMessages, ...parentMessages].sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-
-      setMessages(allMessages);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "读取留言失败。");
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
   useEffect(() => {
-    fetchMessages();
+    let isCancelled = false;
+
+    async function loadMessages() {
+      try {
+        const loadedMessages = await fetchMessages();
+
+        if (isCancelled) {
+          return;
+        }
+
+        setMessages(loadedMessages);
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        setMessage(
+          error instanceof Error ? error.message : "读取留言失败。"
+        );
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadMessages();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const filteredMessages = useMemo(() => {
@@ -239,7 +272,9 @@ function AdminMessagesContent() {
               {totalMessageCount}
             </p>
 
-            <p className="mt-1 text-xs text-stone-500">学生 + 家长/老师</p>
+            <p className="mt-1 text-xs text-stone-500">
+              学生 + 家长/老师
+            </p>
           </div>
 
           <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
@@ -249,7 +284,9 @@ function AdminMessagesContent() {
               {studentMessageCount}
             </p>
 
-            <p className="mt-1 text-xs text-stone-500">来自课程反馈</p>
+            <p className="mt-1 text-xs text-stone-500">
+              来自课程反馈
+            </p>
           </div>
 
           <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
@@ -269,7 +306,9 @@ function AdminMessagesContent() {
               {selectedMessage ? 1 : 0}
             </p>
 
-            <p className="mt-1 text-xs text-stone-500">当前选中的故事素材</p>
+            <p className="mt-1 text-xs text-stone-500">
+              当前选中的故事素材
+            </p>
           </div>
         </section>
 
@@ -290,7 +329,9 @@ function AdminMessagesContent() {
                 <select
                   value={selectedSource}
                   onChange={(event) =>
-                    setSelectedSource(event.target.value as "all" | MessageSource)
+                    setSelectedSource(
+                      event.target.value as "all" | MessageSource
+                    )
                   }
                   className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
                 >
@@ -354,7 +395,9 @@ function AdminMessagesContent() {
 
                           <p className="mt-1 text-xs text-stone-500">
                             关联学生：
-                            {item.studentName || item.authorName || "暂无"}
+                            {item.studentName ||
+                              item.authorName ||
+                              "暂无"}
                           </p>
                         </div>
 
@@ -400,7 +443,8 @@ function AdminMessagesContent() {
             </h2>
 
             <p className="mt-2 text-sm leading-7 text-stone-600">
-              这里是未来功能预留：以后可以把学生、家长或老师的感想整理后发布到首页或“我和 ORP 的故事”页面。
+              这里是未来功能预留：以后可以把学生、家长或老师的感想整理后发布到首页或“我和
+              ORP 的故事”页面。
             </p>
 
             {!selectedMessage ? (

@@ -61,10 +61,42 @@ type StudentTableItem = {
   recentLessonDate: string | null;
 };
 
+/**
+ * Supabase 嵌套关系可能被表示为单个对象、数组或 null。
+ * 这里明确写出真实结构，避免使用 any。
+ */
+type RelatedCohort = {
+  id: string;
+  name: string;
+  status: string;
+};
+
+type RelatedTeacher = {
+  id: string;
+  name: string;
+};
+
+type ClassTeacherRelation = {
+  teachers: RelatedTeacher | RelatedTeacher[] | null;
+};
+
+type RelatedClass = {
+  id: string;
+  name: string;
+  subject: string | null;
+  status: string;
+  cohort_id: string | null;
+  cohorts: RelatedCohort | RelatedCohort[] | null;
+  class_teachers:
+    | ClassTeacherRelation
+    | ClassTeacherRelation[]
+    | null;
+};
+
 type ClassStudentRow = {
   student_id: string;
   class_id: string;
-  classes: any;
+  classes: RelatedClass | RelatedClass[] | null;
 };
 
 type LessonRecordRow = {
@@ -85,6 +117,29 @@ type CohortRow = {
   status: string;
 };
 
+type StudentsPageData = {
+  students: StudentTableItem[];
+  cohorts: CohortRow[];
+};
+
+/**
+ * 无论 Supabase 返回单个对象还是数组，都统一取一个对象。
+ */
+function getOne<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value;
+}
+
+/**
+ * 无论 Supabase 返回单个对象还是数组，都统一转换成数组。
+ */
+function getMany<T>(value: T | T[] | null | undefined): T[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  return [value];
+}
+
 function isCurrentStudent(student: StudentTableItem) {
   return student.status === "active" && student.classIds.length > 0;
 }
@@ -103,33 +158,62 @@ function getStudentStatusLabel(status: string) {
   if (status === "withdrawn") return "已退出";
   if (status === "archived") return "已归档";
   if (status === "delete_requested") return "待维护";
+
   return status;
 }
 
 function getStudentStatusClassName(status: string) {
-  if (status === "active") return "bg-emerald-50 text-emerald-700";
-  if (status === "withdrawn") return "bg-amber-50 text-amber-700";
-  if (status === "archived") return "bg-stone-100 text-stone-500";
-  if (status === "delete_requested") return "bg-red-50 text-red-700";
+  if (status === "active") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "withdrawn") {
+    return "bg-amber-50 text-amber-700";
+  }
+
+  if (status === "archived") {
+    return "bg-stone-100 text-stone-500";
+  }
+
+  if (status === "delete_requested") {
+    return "bg-red-50 text-red-700";
+  }
+
   return "bg-stone-100 text-stone-500";
 }
 
 function getSubjectLabel(subject: string | null | undefined) {
   if (subject === "english") return "英语";
   if (subject === "math") return "数学";
+
   return "未设置";
 }
 
 function getSubjectClassName(subject: string | null | undefined) {
-  if (subject === "english") return "bg-sky-50 text-sky-700";
-  if (subject === "math") return "bg-violet-50 text-violet-700";
+  if (subject === "english") {
+    return "bg-sky-50 text-sky-700";
+  }
+
+  if (subject === "math") {
+    return "bg-violet-50 text-violet-700";
+  }
+
   return "bg-stone-100 text-stone-500";
 }
 
 function getAttendanceRateClassName(attendanceRate: number | null) {
-  if (attendanceRate === null) return "bg-stone-100 text-stone-500";
-  if (attendanceRate < 0.6) return "bg-red-50 text-red-700";
-  if (attendanceRate < 0.8) return "bg-amber-50 text-amber-700";
+  if (attendanceRate === null) {
+    return "bg-stone-100 text-stone-500";
+  }
+
+  if (attendanceRate < 0.6) {
+    return "bg-red-50 text-red-700";
+  }
+
+  if (attendanceRate < 0.8) {
+    return "bg-amber-50 text-amber-700";
+  }
+
   return "bg-emerald-50 text-emerald-700";
 }
 
@@ -176,7 +260,10 @@ function getAttentionLabel(student: StudentTableItem) {
     };
   }
 
-  if (student.recentThirtyDaysLessonCount === 0 && student.lessonCount > 0) {
+  if (
+    student.recentThirtyDaysLessonCount === 0 &&
+    student.lessonCount > 0
+  ) {
     return {
       text: "近 30 天无课",
       className: "bg-amber-50 text-amber-700",
@@ -198,6 +285,7 @@ function getAttentionLabel(student: StudentTableItem) {
 
 function formatAttendanceRate(student: StudentTableItem) {
   if (student.attendanceRate === null) return "暂无";
+
   return `${Math.round(student.attendanceRate * 100)}%`;
 }
 
@@ -216,6 +304,236 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+/**
+ * 读取并整理学生页面需要的数据。
+ * 这个函数只负责查询和返回数据，不直接修改 React state。
+ */
+async function fetchStudentsPageData(): Promise<StudentsPageData> {
+  const [
+    studentResult,
+    classStudentResult,
+    lessonResult,
+    attendanceResult,
+    cohortResult,
+  ] = await Promise.all([
+    supabase
+      .from("students")
+      .select("id, name, note, status, username, grade, created_at")
+      .order("created_at", { ascending: false }),
+
+    supabase.from("class_students").select(
+      `
+        student_id,
+        class_id,
+        classes (
+          id,
+          name,
+          subject,
+          status,
+          cohort_id,
+          cohorts (
+            id,
+            name,
+            status
+          ),
+          class_teachers (
+            teachers (
+              id,
+              name
+            )
+          )
+        )
+      `
+    ),
+
+    supabase
+      .from("lesson_records")
+      .select("id, class_id, lesson_date")
+      .order("lesson_date", { ascending: false }),
+
+    supabase
+      .from("lesson_attendance")
+      .select("student_id, is_present, lesson_record_id"),
+
+    supabase
+      .from("cohorts")
+      .select("id, name, status")
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (studentResult.error) {
+    throw new Error(`读取学生失败：${studentResult.error.message}`);
+  }
+
+  if (classStudentResult.error) {
+    throw new Error(
+      `读取学生班级关系失败：${classStudentResult.error.message}`
+    );
+  }
+
+  if (lessonResult.error) {
+    throw new Error(`读取课程记录失败：${lessonResult.error.message}`);
+  }
+
+  if (attendanceResult.error) {
+    throw new Error(`读取出勤记录失败：${attendanceResult.error.message}`);
+  }
+
+  if (cohortResult.error) {
+    throw new Error(`读取届别失败：${cohortResult.error.message}`);
+  }
+
+  const studentRows = (studentResult.data ?? []) as StudentRow[];
+
+  const classStudentRows =
+    (classStudentResult.data ?? []) as unknown as ClassStudentRow[];
+
+  const lessonRows = (lessonResult.data ?? []) as LessonRecordRow[];
+  const attendanceRows = (attendanceResult.data ?? []) as AttendanceRow[];
+  const cohorts = (cohortResult.data ?? []) as CohortRow[];
+
+  const formattedStudents: StudentTableItem[] = studentRows.map(
+    (student) => {
+      const studentClassRelations = classStudentRows.filter(
+        (relation) => relation.student_id === student.id
+      );
+
+      const classIds = uniqueStrings(
+        studentClassRelations
+          .map((relation) => relation.class_id)
+          .filter(Boolean)
+      );
+
+      const relatedClasses = studentClassRelations
+        .map((relation) => ({
+          relation,
+          classItem: getOne(relation.classes),
+        }))
+        .filter(
+          (
+            item
+          ): item is {
+            relation: ClassStudentRow;
+            classItem: RelatedClass;
+          } => item.classItem !== null
+        );
+
+      const classNames = uniqueStrings(
+        relatedClasses.map(({ classItem }) => classItem.name)
+      );
+
+      const cohortIds = uniqueStrings(
+        relatedClasses
+          .map(({ classItem }) => getOne(classItem.cohorts)?.id ?? "")
+          .filter(Boolean)
+      );
+
+      const subjects = uniqueStrings(
+        relatedClasses
+          .map(({ classItem }) => classItem.subject ?? "")
+          .filter(Boolean)
+      );
+
+      const classSummaries: StudentClassSummary[] = relatedClasses.map(
+        ({ relation, classItem }) => {
+          const classTeacherRelations = getMany(
+            classItem.class_teachers
+          );
+
+          const teacherNames = uniqueStrings(
+            classTeacherRelations
+              .map((teacherRelation) => {
+                const teacher = getOne(teacherRelation.teachers);
+                return teacher?.name ?? "";
+              })
+              .filter(Boolean)
+          );
+
+          return {
+            classId: relation.class_id,
+            className: classItem.name || "未知班级",
+            subject: classItem.subject,
+            teacherNames,
+          };
+        }
+      );
+
+      const teacherNames = uniqueStrings(
+        classSummaries.flatMap((summary) => summary.teacherNames)
+      );
+
+      const studentLessons = lessonRows.filter((lesson) => {
+        if (!lesson.class_id) return false;
+
+        return classIds.includes(lesson.class_id);
+      });
+
+      const lessonIds = new Set(
+        studentLessons.map((lesson) => lesson.id)
+      );
+
+      const recentThirtyDaysLessonCount = studentLessons.filter(
+        (lesson) => isWithinRecentThirtyDays(lesson.lesson_date)
+      ).length;
+
+      /*
+       * lessonRows 已按日期倒序排列，
+       * 因此第一个相关课程就是最近课程。
+       */
+      const recentLessonDate =
+        studentLessons[0]?.lesson_date ?? null;
+
+      const studentAttendances = attendanceRows.filter(
+        (attendance) =>
+          attendance.student_id === student.id &&
+          lessonIds.has(attendance.lesson_record_id)
+      );
+
+      const presentCount = studentAttendances.filter(
+        (attendance) => attendance.is_present
+      ).length;
+
+      const absentCount = studentAttendances.filter(
+        (attendance) => !attendance.is_present
+      ).length;
+
+      const attendanceRate =
+        studentAttendances.length > 0
+          ? presentCount / studentAttendances.length
+          : null;
+
+      return {
+        id: student.id,
+        name: student.name,
+        note: student.note,
+        status: student.status || "active",
+        username: student.username,
+        grade: student.grade,
+
+        classIds,
+        classNames,
+        classSummaries,
+        cohortIds,
+        teacherNames,
+        subjects,
+
+        lessonCount: studentLessons.length,
+        recentThirtyDaysLessonCount,
+        attendanceCount: studentAttendances.length,
+        presentCount,
+        absentCount,
+        attendanceRate,
+        recentLessonDate,
+      };
+    }
+  );
+
+  return {
+    students: formattedStudents,
+    cohorts,
+  };
+}
+
 export default function AdminStudentsPage() {
   return (
     <AdminGuard>
@@ -228,220 +546,70 @@ function AdminStudentsContent() {
   const [students, setStudents] = useState<StudentTableItem[]>([]);
   const [cohorts, setCohorts] = useState<CohortRow[]>([]);
 
-  const [selectedCohortId, setSelectedCohortId] = useState("all");
-  const [selectedStatusView, setSelectedStatusView] = useState("current");
+  const [selectedCohortId, setSelectedCohortId] =
+    useState("all");
+
+  const [selectedStatusView, setSelectedStatusView] =
+    useState("current");
+
   const [keyword, setKeyword] = useState("");
 
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  async function fetchStudents() {
-    setIsLoading(true);
-    setMessage("");
-
-    try {
-      const { data: studentData, error: studentError } = await supabase
-        .from("students")
-        .select("id, name, note, status, username, grade, created_at")
-        .order("created_at", { ascending: false });
-
-      if (studentError) {
-        throw new Error(`读取学生失败：${studentError.message}`);
-      }
-
-      const { data: classStudentData, error: classStudentError } =
-        await supabase.from("class_students").select(
-          `
-          student_id,
-          class_id,
-          classes (
-            id,
-            name,
-            subject,
-            status,
-            cohort_id,
-            cohorts (
-              id,
-              name,
-              status
-            ),
-            class_teachers (
-              teachers (
-                id,
-                name
-              )
-            )
-          )
-        `
-        );
-
-      if (classStudentError) {
-        throw new Error(`读取学生班级关系失败：${classStudentError.message}`);
-      }
-
-      const { data: lessonData, error: lessonError } = await supabase
-        .from("lesson_records")
-        .select("id, class_id, lesson_date")
-        .order("lesson_date", { ascending: false });
-
-      if (lessonError) {
-        throw new Error(`读取课程记录失败：${lessonError.message}`);
-      }
-
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from("lesson_attendance")
-        .select("student_id, is_present, lesson_record_id");
-
-      if (attendanceError) {
-        throw new Error(`读取出勤记录失败：${attendanceError.message}`);
-      }
-
-      const { data: cohortData, error: cohortError } = await supabase
-        .from("cohorts")
-        .select("id, name, status")
-        .order("created_at", { ascending: false });
-
-      if (cohortError) {
-        throw new Error(`读取届别失败：${cohortError.message}`);
-      }
-
-      const studentRows = (studentData || []) as StudentRow[];
-      const classStudentRows = (classStudentData || []) as ClassStudentRow[];
-      const lessonRows = (lessonData || []) as LessonRecordRow[];
-      const attendanceRows = (attendanceData || []) as AttendanceRow[];
-
-      const formattedStudents: StudentTableItem[] = studentRows.map(
-        (student) => {
-          const studentClassRelations = classStudentRows.filter(
-            (relation) => relation.student_id === student.id
-          );
-
-          const classIds = studentClassRelations
-            .map((relation) => relation.class_id)
-            .filter(Boolean);
-
-          const classNames = studentClassRelations
-            .map((relation) => relation.classes?.name)
-            .filter(Boolean) as string[];
-
-          const cohortIds = uniqueStrings(
-            studentClassRelations
-              .map((relation) => relation.classes?.cohorts?.id)
-              .filter(Boolean) as string[]
-          );
-
-          const subjects = uniqueStrings(
-            studentClassRelations
-              .map((relation) => relation.classes?.subject)
-              .filter(Boolean) as string[]
-          );
-
-          const classSummaries = studentClassRelations
-            .map((relation) => {
-              const classItem = relation.classes;
-
-              if (!classItem) return null;
-
-              const classTeachers = classItem.class_teachers || [];
-
-              const teacherNames = uniqueStrings(
-                classTeachers
-                  .map((item: any) => item.teachers?.name)
-                  .filter(Boolean)
-              );
-
-              return {
-                classId: relation.class_id,
-                className: classItem.name || "未知班级",
-                subject: classItem.subject || null,
-                teacherNames,
-              };
-            })
-            .filter(Boolean) as StudentClassSummary[];
-
-          const teacherNames = uniqueStrings(
-            classSummaries.flatMap((summary) => summary.teacherNames)
-          );
-
-          const studentLessons = lessonRows.filter((lesson) => {
-            if (!lesson.class_id) return false;
-            return classIds.includes(lesson.class_id);
-          });
-
-          const lessonIds = new Set(studentLessons.map((lesson) => lesson.id));
-
-          const recentThirtyDaysLessonCount = studentLessons.filter((lesson) =>
-            isWithinRecentThirtyDays(lesson.lesson_date)
-          ).length;
-
-          const recentLessonDate = studentLessons[0]?.lesson_date || null;
-
-          const studentAttendances = attendanceRows.filter((attendance) => {
-            return (
-              attendance.student_id === student.id &&
-              lessonIds.has(attendance.lesson_record_id)
-            );
-          });
-
-          const presentCount = studentAttendances.filter(
-            (attendance) => attendance.is_present
-          ).length;
-
-          const absentCount = studentAttendances.filter(
-            (attendance) => !attendance.is_present
-          ).length;
-
-          const attendanceRate =
-            studentAttendances.length > 0
-              ? presentCount / studentAttendances.length
-              : null;
-
-          return {
-            id: student.id,
-            name: student.name,
-            note: student.note,
-            status: student.status || "active",
-            username: student.username,
-            grade: student.grade,
-
-            classIds,
-            classNames,
-            classSummaries,
-            cohortIds,
-            teacherNames,
-            subjects,
-
-            lessonCount: studentLessons.length,
-            recentThirtyDaysLessonCount,
-            attendanceCount: studentAttendances.length,
-            presentCount,
-            absentCount,
-            attendanceRate,
-            recentLessonDate,
-          };
-        }
-      );
-
-      setStudents(formattedStudents);
-      setCohorts((cohortData || []) as CohortRow[]);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "读取学生数据失败。");
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
+  /*
+   * 首次进入页面时加载数据。
+   * isLoading 初始值已经是 true，因此这里不重复 setIsLoading(true)。
+   */
   useEffect(() => {
-    fetchStudents();
+    let isCancelled = false;
+
+    async function loadStudents() {
+      try {
+        const loadedData = await fetchStudentsPageData();
+
+        if (isCancelled) {
+          return;
+        }
+
+        setStudents(loadedData.students);
+        setCohorts(loadedData.cohorts);
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "读取学生数据失败。"
+        );
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadStudents();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const selectedCohort = useMemo(() => {
     if (selectedCohortId === "all") return null;
 
-    return cohorts.find((cohort) => cohort.id === selectedCohortId) || null;
+    return (
+      cohorts.find(
+        (cohort) => cohort.id === selectedCohortId
+      ) ?? null
+    );
   }, [cohorts, selectedCohortId]);
 
-  const isSelectedCohortArchived = selectedCohort?.status === "archived";
+  const isSelectedCohortArchived =
+    selectedCohort?.status === "archived";
 
   const filteredStudents = useMemo(() => {
     const searchText = keyword.trim().toLowerCase();
@@ -454,6 +622,10 @@ function AdminStudentsContent() {
       );
     }
 
+    /*
+     * 查看已封存届别时，直接展示该届全部历史学生，
+     * 不再继续套用当前、退出、归档等状态筛选。
+     */
     if (!isSelectedCohortArchived) {
       if (selectedStatusView === "current") {
         result = result.filter(isCurrentStudent);
@@ -464,11 +636,15 @@ function AdminStudentsContent() {
       }
 
       if (selectedStatusView === "withdrawn") {
-        result = result.filter((student) => student.status === "withdrawn");
+        result = result.filter(
+          (student) => student.status === "withdrawn"
+        );
       }
 
       if (selectedStatusView === "archived") {
-        result = result.filter((student) => student.status === "archived");
+        result = result.filter(
+          (student) => student.status === "archived"
+        );
       }
     }
 
@@ -509,22 +685,31 @@ function AdminStudentsContent() {
   }, [students]);
 
   const withdrawnStudentCount = useMemo(() => {
-    return students.filter((student) => student.status === "withdrawn").length;
+    return students.filter(
+      (student) => student.status === "withdrawn"
+    ).length;
   }, [students]);
 
   const archivedStudentCount = useMemo(() => {
-    return students.filter((student) => student.status === "archived").length;
+    return students.filter(
+      (student) => student.status === "archived"
+    ).length;
   }, [students]);
 
   const averageAttendanceRate = useMemo(() => {
     const studentsWithAttendance = students.filter(
-      (student) => isCurrentStudent(student) && student.attendanceRate !== null
+      (student) =>
+        isCurrentStudent(student) &&
+        student.attendanceRate !== null
     );
 
-    if (studentsWithAttendance.length === 0) return null;
+    if (studentsWithAttendance.length === 0) {
+      return null;
+    }
 
     const total = studentsWithAttendance.reduce(
-      (sum, student) => sum + (student.attendanceRate || 0),
+      (sum, student) =>
+        sum + (student.attendanceRate ?? 0),
       0
     );
 
@@ -570,13 +755,17 @@ function AdminStudentsContent() {
 
         <section className="grid gap-4 md:grid-cols-5">
           <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">当前学生</p>
+            <p className="text-sm text-stone-500">
+              当前学生
+            </p>
 
             <p className="mt-2 text-3xl font-bold text-emerald-950">
               {currentStudentCount}
             </p>
 
-            <p className="mt-1 text-xs text-stone-500">当前且已绑定班级</p>
+            <p className="mt-1 text-xs text-stone-500">
+              当前且已绑定班级
+            </p>
           </div>
 
           <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
@@ -592,7 +781,9 @@ function AdminStudentsContent() {
           </div>
 
           <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">已退出学生</p>
+            <p className="text-sm text-stone-500">
+              已退出学生
+            </p>
 
             <p className="mt-2 text-3xl font-bold text-amber-700">
               {withdrawnStudentCount}
@@ -600,7 +791,9 @@ function AdminStudentsContent() {
           </div>
 
           <div className="rounded-2xl border border-stone-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">已归档学生</p>
+            <p className="text-sm text-stone-500">
+              已归档学生
+            </p>
 
             <p className="mt-2 text-3xl font-bold text-stone-600">
               {archivedStudentCount}
@@ -608,41 +801,58 @@ function AdminStudentsContent() {
           </div>
 
           <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">平均出勤率</p>
+            <p className="text-sm text-stone-500">
+              平均出勤率
+            </p>
 
             <p className="mt-2 text-3xl font-bold text-emerald-950">
               {averageAttendanceRate === null
                 ? "暂无"
-                : `${Math.round(averageAttendanceRate * 100)}%`}
+                : `${Math.round(
+                    averageAttendanceRate * 100
+                  )}%`}
             </p>
 
-            <p className="mt-1 text-xs text-stone-500">当前学生平均</p>
+            <p className="mt-1 text-xs text-stone-500">
+              当前学生平均
+            </p>
           </div>
         </section>
 
         <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
             <div>
-              <h2 className="text-xl font-bold text-emerald-950">学生列表</h2>
+              <h2 className="text-xl font-bold text-emerald-950">
+                学生列表
+              </h2>
             </div>
 
             <div className="flex flex-col gap-2 md:items-end">
               <div
                 className={`grid gap-2 ${
-                  isSelectedCohortArchived ? "md:grid-cols-2" : "md:grid-cols-3"
+                  isSelectedCohortArchived
+                    ? "md:grid-cols-2"
+                    : "md:grid-cols-3"
                 }`}
               >
                 <select
                   value={selectedCohortId}
-                  onChange={(event) => setSelectedCohortId(event.target.value)}
+                  onChange={(event) =>
+                    setSelectedCohortId(event.target.value)
+                  }
                   className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
                 >
                   <option value="all">全部届别</option>
 
                   {cohorts.map((cohort) => (
-                    <option key={cohort.id} value={cohort.id}>
+                    <option
+                      key={cohort.id}
+                      value={cohort.id}
+                    >
                       {cohort.name} -{" "}
-                      {cohort.status === "active" ? "运行中" : "已封存"}
+                      {cohort.status === "active"
+                        ? "运行中"
+                        : "已封存"}
                     </option>
                   ))}
                 </select>
@@ -651,20 +861,32 @@ function AdminStudentsContent() {
                   <select
                     value={selectedStatusView}
                     onChange={(event) =>
-                      setSelectedStatusView(event.target.value)
+                      setSelectedStatusView(
+                        event.target.value
+                      )
                     }
                     className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
                   >
-                    <option value="current">当前学生</option>
-                    <option value="needs_maintenance">待维护</option>
-                    <option value="withdrawn">已退出学生</option>
-                    <option value="archived">已归档学生</option>
+                    <option value="current">
+                      当前学生
+                    </option>
+                    <option value="needs_maintenance">
+                      待维护
+                    </option>
+                    <option value="withdrawn">
+                      已退出学生
+                    </option>
+                    <option value="archived">
+                      已归档学生
+                    </option>
                   </select>
                 )}
 
                 <input
                   value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
+                  onChange={(event) =>
+                    setKeyword(event.target.value)
+                  }
                   placeholder="搜索学生、学科、班级、老师..."
                   className="rounded-full border border-emerald-100 bg-[#fffdf4] px-4 py-2 text-sm outline-none focus:border-emerald-500"
                 />
@@ -685,32 +907,57 @@ function AdminStudentsContent() {
               <table className="w-full min-w-[1180px] border-collapse bg-white text-left text-sm">
                 <thead className="bg-[#fffdf4] text-xs uppercase tracking-wide text-stone-500">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">学生</th>
-                    <th className="px-4 py-3 font-semibold">学科</th>
-                    <th className="px-4 py-3 font-semibold">班级 / 小老师</th>
-                    <th className="px-4 py-3 font-semibold">出勤率</th>
-                    <th className="px-4 py-3 font-semibold">近 30 天</th>
-                    <th className="px-4 py-3 font-semibold">上课情况</th>
-                    <th className="px-4 py-3 font-semibold">关注状态</th>
-                    <th className="px-4 py-3 font-semibold">状态</th>
-                    <th className="px-4 py-3 font-semibold">详情</th>
+                    <th className="px-4 py-3 font-semibold">
+                      学生
+                    </th>
+                    <th className="px-4 py-3 font-semibold">
+                      学科
+                    </th>
+                    <th className="px-4 py-3 font-semibold">
+                      班级 / 小老师
+                    </th>
+                    <th className="px-4 py-3 font-semibold">
+                      出勤率
+                    </th>
+                    <th className="px-4 py-3 font-semibold">
+                      近 30 天
+                    </th>
+                    <th className="px-4 py-3 font-semibold">
+                      上课情况
+                    </th>
+                    <th className="px-4 py-3 font-semibold">
+                      关注状态
+                    </th>
+                    <th className="px-4 py-3 font-semibold">
+                      状态
+                    </th>
+                    <th className="px-4 py-3 font-semibold">
+                      详情
+                    </th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-emerald-50">
                   {filteredStudents.map((student) => {
-                    const attention = getAttentionLabel(student);
+                    const attention =
+                      getAttentionLabel(student);
 
                     return (
-                      <tr key={student.id} className="align-top">
+                      <tr
+                        key={student.id}
+                        className="align-top"
+                      >
                         <td className="px-4 py-4">
                           <p className="font-bold text-emerald-950">
                             {student.name}
                           </p>
 
                           <p className="mt-1 text-xs text-stone-500">
-                            {student.username || "无用户名"} ·{" "}
-                            {student.grade || "未填写年级"}
+                            {student.username ||
+                              "无用户名"}{" "}
+                            ·{" "}
+                            {student.grade ||
+                              "未填写年级"}
                           </p>
 
                           {student.note && (
@@ -721,50 +968,64 @@ function AdminStudentsContent() {
                         </td>
 
                         <td className="px-4 py-4">
-                          {student.subjects.length === 0 ? (
+                          {student.subjects.length ===
+                          0 ? (
                             <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-500">
                               未设置
                             </span>
                           ) : (
                             <div className="flex flex-wrap gap-2">
-                              {student.subjects.map((subject) => (
-                                <span
-                                  key={`${student.id}-${subject}`}
-                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
-                                    subject
-                                  )}`}
-                                >
-                                  {getSubjectLabel(subject)}
-                                </span>
-                              ))}
+                              {student.subjects.map(
+                                (subject) => (
+                                  <span
+                                    key={`${student.id}-${subject}`}
+                                    className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
+                                      subject
+                                    )}`}
+                                  >
+                                    {getSubjectLabel(
+                                      subject
+                                    )}
+                                  </span>
+                                )
+                              )}
                             </div>
                           )}
                         </td>
 
                         <td className="px-4 py-4">
-                          {student.classSummaries.length === 0 ? (
+                          {student.classSummaries
+                            .length === 0 ? (
                             <p className="text-sm text-red-500">
                               暂未绑定班级
                             </p>
                           ) : (
                             <div className="space-y-2">
-                              {student.classSummaries.map((summary) => (
-                                <div
-                                  key={`${student.id}-${summary.classId}`}
-                                  className="rounded-2xl bg-[#fffdf4] px-3 py-2 text-xs text-stone-600"
-                                >
-                                  <p className="font-semibold text-emerald-950">
-                                    {summary.className}
-                                  </p>
+                              {student.classSummaries.map(
+                                (summary) => (
+                                  <div
+                                    key={`${student.id}-${summary.classId}`}
+                                    className="rounded-2xl bg-[#fffdf4] px-3 py-2 text-xs text-stone-600"
+                                  >
+                                    <p className="font-semibold text-emerald-950">
+                                      {
+                                        summary.className
+                                      }
+                                    </p>
 
-                                  <p className="mt-1 text-stone-500">
-                                    小老师：
-                                    {summary.teacherNames.length > 0
-                                      ? summary.teacherNames.join("、")
-                                      : "暂无"}
-                                  </p>
-                                </div>
-                              ))}
+                                    <p className="mt-1 text-stone-500">
+                                      小老师：
+                                      {summary
+                                        .teacherNames
+                                        .length > 0
+                                        ? summary.teacherNames.join(
+                                            "、"
+                                          )
+                                        : "暂无"}
+                                    </p>
+                                  </div>
+                                )
+                              )}
                             </div>
                           )}
                         </td>
@@ -775,30 +1036,40 @@ function AdminStudentsContent() {
                               student.attendanceRate
                             )}`}
                           >
-                            {formatAttendanceRate(student)}
+                            {formatAttendanceRate(
+                              student
+                            )}
                           </span>
 
                           <p className="mt-2 text-xs text-stone-500">
-                            出勤：{student.presentCount}/
+                            出勤：
+                            {student.presentCount}/
                             {student.attendanceCount}
                           </p>
                         </td>
 
                         <td className="px-4 py-4">
                           <p className="text-2xl font-bold text-emerald-950">
-                            {student.recentThirtyDaysLessonCount}
+                            {
+                              student.recentThirtyDaysLessonCount
+                            }
                           </p>
 
-                          <p className="mt-1 text-xs text-stone-500">次课程</p>
+                          <p className="mt-1 text-xs text-stone-500">
+                            次课程
+                          </p>
                         </td>
 
                         <td className="px-4 py-4">
                           <p className="font-semibold text-emerald-950">
-                            {student.lessonCount} 节相关课程
+                            {student.lessonCount}{" "}
+                            节相关课程
                           </p>
 
                           <p className="mt-1 text-xs text-stone-500">
-                            最近课程：{student.recentLessonDate || "暂无"}
+                            最近课程：
+                            {student.recentLessonDate ||
+                              "暂无"}
                           </p>
                         </td>
 
@@ -816,7 +1087,9 @@ function AdminStudentsContent() {
                               student.status
                             )}`}
                           >
-                            {getStudentStatusLabel(student.status)}
+                            {getStudentStatusLabel(
+                              student.status
+                            )}
                           </span>
                         </td>
 

@@ -47,7 +47,7 @@ export async function createMaintenanceRequest(params: {
   targetId: string;
   targetName: string;
   note?: string;
-  actionPayload?: Record<string, any>;
+  actionPayload?: Record<string, unknown>;
 }) {
   return maintenanceFetch("/api/admin/maintenance", {
     method: "POST",

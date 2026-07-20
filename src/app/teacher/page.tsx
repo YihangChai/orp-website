@@ -3,23 +3,24 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import TeacherGuard, { useCurrentTeacher } from "@/components/TeacherGuard";
-import type { CurrentTeacher } from "@/lib/auth";
+import TeacherGuard, {
+  useCurrentTeacher,
+} from "@/components/TeacherGuard";
 
 /**
- * 这个页面的结构原则：
+ * 页面结构原则：
  * 1. TeacherGuard 负责确认当前登录者是不是小老师。
- * 2. 本页面只负责读取“小老师主页”需要的业务数据。
- * 3. 本页面不再调用 getCurrentTeacher，避免和 TeacherGuard 重复查身份。
+ * 2. 本页面只读取“小老师主页”需要的业务数据。
+ * 3. 本页面不再调用 getCurrentTeacher，避免重复查询身份。
  *
  * 学科规则：
- * - teachers.subject 是老师自己的教学学科，首页轻量显示一次。
- * - classes.subject 是班级学科，首页不在每个班级卡片重复显示。
+ * - teachers.subject 是老师自己的教学学科。
+ * - classes.subject 是班级学科。
  * - 如果老师学科和班级学科不一致，只显示维护提醒。
  */
 
 /* =========================
-   1. 类型定义：描述页面会用到的数据结构
+   1. 页面使用的标准类型
    ========================= */
 
 type TeacherProfile = {
@@ -57,9 +58,13 @@ type ClassRow = {
   class_students: ClassStudentRelation[];
 };
 
+/**
+ * 已经经过 normalize 和过滤。
+ * 因此页面内部的 classes 一定存在，不再允许 null。
+ */
 type ClassTeacherRelation = {
   class_id: string;
-  classes: ClassRow | null;
+  classes: ClassRow;
 };
 
 type StudentInClass = {
@@ -90,6 +95,11 @@ type TeachingGoalWithProgress = TeachingGoal & {
   completed_lessons: number;
 };
 
+type LessonGoalProgressRow = {
+  id: string;
+  goal_id: string | null;
+};
+
 type TeacherHomePageData = {
   teacher: TeacherProfile;
   classRelations: ClassTeacherRelation[];
@@ -99,15 +109,100 @@ type TeacherHomePageData = {
 };
 
 /* =========================
-   2. 工具函数
+   2. Supabase 原始返回类型
    ========================= */
 
+/**
+ * Supabase 嵌套关系可能返回：
+ * - 单个对象
+ * - 数组
+ * - null
+ *
+ * 所以原始类型保留这些可能性，
+ * 随后再转换成页面标准类型。
+ */
+
+type RawClassStudentRelation = {
+  students: StudentRow | StudentRow[] | null;
+};
+
+type RawClassRow = {
+  id: string;
+  name: string;
+  school: string | null;
+  subject: string | null;
+  status: string;
+  cohorts: CohortRow | CohortRow[] | null;
+  class_students:
+    | RawClassStudentRelation
+    | RawClassStudentRelation[]
+    | null;
+};
+
+type RawClassTeacherRelation = {
+  class_id: string;
+  classes: RawClassRow | RawClassRow[] | null;
+};
+
+/* =========================
+   3. 稳定的空数组
+   ========================= */
+
+/**
+ * 这些数组定义在组件外。
+ * 不会因为组件重新渲染而不断创建新引用。
+ */
+const EMPTY_CLASS_RELATIONS: ClassTeacherRelation[] = [];
+const EMPTY_STUDENTS_IN_CLASSES: StudentInClass[] = [];
+const EMPTY_LESSON_RECORDS: LessonRecord[] = [];
+const EMPTY_GOALS: TeachingGoalWithProgress[] = [];
+
+/* =========================
+   4. 工具函数
+   ========================= */
+
+/**
+ * 将“对象、数组或 null”统一转换成单个对象。
+ */
+function getOne<T>(
+  value: T | T[] | null | undefined
+): T | null {
+  if (!value) return null;
+
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return value;
+}
+
+/**
+ * 将“对象、数组或 null”统一转换成数组。
+ */
+function getMany<T>(
+  value: T | T[] | null | undefined
+): T[] {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  return [value];
+}
+
 function isActiveStudent(student: StudentRow) {
-  return student.status !== "withdrawn" && student.status !== "archived";
+  return (
+    student.status !== "withdrawn" &&
+    student.status !== "archived"
+  );
 }
 
 function isCurrentClass(classItem: ClassRow) {
-  return classItem.status === "active" && classItem.cohorts?.status === "active";
+  return (
+    classItem.status === "active" &&
+    classItem.cohorts?.status === "active"
+  );
 }
 
 function uniqueStudentsById(students: StudentRow[]) {
@@ -120,15 +215,26 @@ function uniqueStudentsById(students: StudentRow[]) {
   return Array.from(studentMap.values());
 }
 
-function getSubjectLabel(subject: string | null | undefined) {
+function getSubjectLabel(
+  subject: string | null | undefined
+) {
   if (subject === "english") return "英语";
   if (subject === "math") return "数学";
+
   return "暂未设置";
 }
 
-function getSubjectClassName(subject: string | null | undefined) {
-  if (subject === "english") return "bg-sky-50 text-sky-700";
-  if (subject === "math") return "bg-violet-50 text-violet-700";
+function getSubjectClassName(
+  subject: string | null | undefined
+) {
+  if (subject === "english") {
+    return "bg-sky-50 text-sky-700";
+  }
+
+  if (subject === "math") {
+    return "bg-violet-50 text-violet-700";
+  }
+
   return "bg-stone-100 text-stone-500";
 }
 
@@ -136,61 +242,83 @@ function hasClassSubjectConflict(
   teacherSubject: string | null | undefined,
   classItem: ClassRow
 ) {
-  if (!teacherSubject || !classItem.subject) return false;
+  if (!teacherSubject || !classItem.subject) {
+    return false;
+  }
+
   return teacherSubject !== classItem.subject;
 }
 
-/* =========================
-   3. 页面外壳：只负责套 TeacherGuard
-   ========================= */
+/**
+ * 将 Supabase 原始班级数据，
+ * 转换成页面内部统一使用的 ClassRow。
+ */
+function normalizeClass(rawClass: RawClassRow): ClassRow {
+  const cohort = getOne(rawClass.cohorts);
 
-export default function TeacherPage() {
-  return (
-    <TeacherGuard>
-      <TeacherHomeContent />
-    </TeacherGuard>
-  );
+  const classStudents = getMany(
+    rawClass.class_students
+  ).map((relation) => ({
+    students: getOne(relation.students),
+  }));
+
+  return {
+    id: rawClass.id,
+    name: rawClass.name,
+    school: rawClass.school,
+    subject: rawClass.subject,
+    status: rawClass.status,
+    cohorts: cohort,
+    class_students: classStudents,
+  };
 }
 
 /* =========================
-   4. 页面主体：真正的小老师主页
+   5. 数据查询函数
    ========================= */
 
-function TeacherHomeContent() {
-  const currentTeacher = useCurrentTeacher();
-
-  const [pageData, setPageData] = useState<TeacherHomePageData | null>(null);
-  const [isLoadingTeacherData, setIsLoadingTeacherData] = useState(true);
-  const [isCompletingGoal, setIsCompletingGoal] = useState(false);
-  const [message, setMessage] = useState("");
-
-  /* =========================
-     5. 数据读取函数：读取老师主页需要的业务数据
-     ========================= */
-
-  async function loadTeacherHomePageData(
-    activeTeacher: CurrentTeacher
-  ): Promise<TeacherHomePageData> {
-    const { data: teacherData, error: teacherError } = await supabase
+/**
+ * 放在组件外，所以不会在每次 render 时重新创建。
+ *
+ * 此函数只负责：
+ * 1. 查询数据库
+ * 2. 检查错误
+ * 3. 整理数据
+ * 4. 返回结果
+ *
+ * 不直接修改 React state。
+ */
+async function loadTeacherHomePageData(
+  teacherId: string
+): Promise<TeacherHomePageData> {
+  const { data: teacherData, error: teacherError } =
+    await supabase
       .from("teachers")
       .select("id, name, email, subject, status")
-      .eq("id", activeTeacher.id)
+      .eq("id", teacherId)
       .maybeSingle();
 
-    if (teacherError) {
-      throw new Error(`读取小老师资料失败：${teacherError.message}`);
-    }
+  if (teacherError) {
+    throw new Error(
+      `读取小老师资料失败：${teacherError.message}`
+    );
+  }
 
-    if (!teacherData) {
-      throw new Error("没有找到小老师资料，请重新登录。");
-    }
+  if (!teacherData) {
+    throw new Error(
+      "没有找到小老师资料，请重新登录。"
+    );
+  }
 
-    const teacher = teacherData as TeacherProfile;
+  const teacher = teacherData as TeacherProfile;
 
-    const { data: classTeacherData, error: classTeacherError } = await supabase
-      .from("class_teachers")
-      .select(
-        `
+  const {
+    data: classTeacherData,
+    error: classTeacherError,
+  } = await supabase
+    .from("class_teachers")
+    .select(
+      `
         class_id,
         classes (
           id,
@@ -213,51 +341,85 @@ function TeacherHomeContent() {
           )
         )
       `
-      )
-      .eq("teacher_id", activeTeacher.id);
+    )
+    .eq("teacher_id", teacherId);
 
-    if (classTeacherError) {
-      throw new Error(`读取小老师班级失败：${classTeacherError.message}`);
+  if (classTeacherError) {
+    throw new Error(
+      `读取小老师班级失败：${classTeacherError.message}`
+    );
+  }
+
+  const rawClassRelations =
+    (classTeacherData ??
+      []) as unknown as RawClassTeacherRelation[];
+
+  /**
+   * 使用循环而不是 map + 类型谓词。
+   *
+   * 只有真正读取到班级的关系才会 push，
+   * 所以最终 classes 一定是 ClassRow。
+   */
+  const classRelations: ClassTeacherRelation[] = [];
+
+  rawClassRelations.forEach((relation) => {
+    const rawClass = getOne(relation.classes);
+
+    if (!rawClass) {
+      return;
     }
 
-    const classRelations = (
-      (classTeacherData || []) as unknown as ClassTeacherRelation[]
-    ).filter((relation) => Boolean(relation.classes));
+    classRelations.push({
+      class_id: relation.class_id,
+      classes: normalizeClass(rawClass),
+    });
+  });
 
-    const classIds = classRelations
-      .map((relation) => relation.class_id)
-      .filter(Boolean);
+  const classIds = classRelations.map(
+    (relation) => relation.class_id
+  );
 
-    const studentsInClasses: StudentInClass[] = classRelations.flatMap(
-      (relation) => {
-        const classStudents = relation.classes?.class_students || [];
-
-        return classStudents.map((classStudent) => ({
+  const studentsInClasses: StudentInClass[] =
+    classRelations.flatMap((relation) => {
+      return relation.classes.class_students.map(
+        (classStudent) => ({
           class_id: relation.class_id,
           students: classStudent.students,
-        }));
-      }
-    );
+        })
+      );
+    });
 
-    if (classIds.length === 0) {
-      return {
-        teacher,
-        classRelations,
-        studentsInClasses,
-        lessonRecords: [],
-        goalsWithProgress: [],
-      };
-    }
+  /**
+   * 没有班级时，不再查询课程和教学目标。
+   */
+  if (classIds.length === 0) {
+    return {
+      teacher,
+      classRelations,
+      studentsInClasses,
+      lessonRecords: [],
+      goalsWithProgress: [],
+    };
+  }
 
-    const [lessonResult, goalsResult] = await Promise.all([
+  /**
+   * 最近课程和教学目标互不依赖，
+   * 因此可以并行查询。
+   */
+  const [lessonResult, goalsResult] =
+    await Promise.all([
       supabase
         .from("lesson_records")
         .select(
           "id, class_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback"
         )
-        .eq("teacher_id", activeTeacher.id)
-        .order("lesson_date", { ascending: false })
-        .order("created_at", { ascending: false })
+        .eq("teacher_id", teacherId)
+        .order("lesson_date", {
+          ascending: false,
+        })
+        .order("created_at", {
+          ascending: false,
+        })
         .limit(3),
 
       supabase
@@ -265,104 +427,171 @@ function TeacherHomeContent() {
         .select(
           "id, class_id, title, description, start_date, expected_lessons, status"
         )
-        .eq("teacher_id", activeTeacher.id)
+        .eq("teacher_id", teacherId)
         .eq("status", "active")
-        .order("created_at", { ascending: false }),
+        .order("created_at", {
+          ascending: false,
+        }),
     ]);
 
-    if (lessonResult.error) {
-      throw new Error(`读取授课记录失败：${lessonResult.error.message}`);
-    }
-
-    if (goalsResult.error) {
-      throw new Error(`读取教学目标失败：${goalsResult.error.message}`);
-    }
-
-    const teachingGoals = (goalsResult.data || []) as TeachingGoal[];
-    const goalIds = teachingGoals.map((goal) => goal.id);
-
-    let lessonRecordsForGoals: { id: string; goal_id: string | null }[] = [];
-
-    if (goalIds.length > 0) {
-      const { data: progressData, error: progressError } = await supabase
-        .from("lesson_records")
-        .select("id, goal_id")
-        .in("goal_id", goalIds);
-
-      if (progressError) {
-        throw new Error(`读取目标进度失败：${progressError.message}`);
-      }
-
-      lessonRecordsForGoals =
-        (progressData || []) as { id: string; goal_id: string | null }[];
-    }
-
-    const goalProgressMap = new Map<string, number>();
-
-    lessonRecordsForGoals.forEach((record) => {
-      if (!record.goal_id) return;
-
-      const currentCount = goalProgressMap.get(record.goal_id) || 0;
-      goalProgressMap.set(record.goal_id, currentCount + 1);
-    });
-
-    const goalsWithProgress: TeachingGoalWithProgress[] = teachingGoals.map(
-      (goal) => ({
-        ...goal,
-        completed_lessons: goalProgressMap.get(goal.id) || 0,
-      })
+  if (lessonResult.error) {
+    throw new Error(
+      `读取授课记录失败：${lessonResult.error.message}`
     );
-
-    return {
-      teacher,
-      classRelations,
-      studentsInClasses,
-      lessonRecords: (lessonResult.data || []) as LessonRecord[],
-      goalsWithProgress,
-    };
   }
 
+  if (goalsResult.error) {
+    throw new Error(
+      `读取教学目标失败：${goalsResult.error.message}`
+    );
+  }
+
+  const lessonRecords =
+    (lessonResult.data ?? []) as LessonRecord[];
+
+  const teachingGoals =
+    (goalsResult.data ?? []) as TeachingGoal[];
+
+  const goalIds = teachingGoals.map((goal) => goal.id);
+
+  let lessonRecordsForGoals: LessonGoalProgressRow[] =
+    [];
+
+  if (goalIds.length > 0) {
+    const {
+      data: progressData,
+      error: progressError,
+    } = await supabase
+      .from("lesson_records")
+      .select("id, goal_id")
+      .in("goal_id", goalIds);
+
+    if (progressError) {
+      throw new Error(
+        `读取目标进度失败：${progressError.message}`
+      );
+    }
+
+    lessonRecordsForGoals =
+      (progressData ??
+        []) as LessonGoalProgressRow[];
+  }
+
+  const goalProgressMap = new Map<string, number>();
+
+  lessonRecordsForGoals.forEach((record) => {
+    if (!record.goal_id) return;
+
+    const currentCount =
+      goalProgressMap.get(record.goal_id) ?? 0;
+
+    goalProgressMap.set(
+      record.goal_id,
+      currentCount + 1
+    );
+  });
+
+  const goalsWithProgress: TeachingGoalWithProgress[] =
+    teachingGoals.map((goal) => ({
+      ...goal,
+      completed_lessons:
+        goalProgressMap.get(goal.id) ?? 0,
+    }));
+
+  return {
+    teacher,
+    classRelations,
+    studentsInClasses,
+    lessonRecords,
+    goalsWithProgress,
+  };
+}
+
+/* =========================
+   6. 页面外壳
+   ========================= */
+
+export default function TeacherPage() {
+  return (
+    <TeacherGuard>
+      <TeacherHomeContent />
+    </TeacherGuard>
+  );
+}
+
+/* =========================
+   7. 页面主体
+   ========================= */
+
+function TeacherHomeContent() {
+  const currentTeacher = useCurrentTeacher();
+
+  /**
+   * effect 只依赖稳定的字符串 ID，
+   * 不依赖整个 currentTeacher 对象。
+   */
+  const teacherId = currentTeacher.id;
+
+  const [pageData, setPageData] =
+    useState<TeacherHomePageData | null>(null);
+
+  const [
+    isLoadingTeacherData,
+    setIsLoadingTeacherData,
+  ] = useState(true);
+
+  const [
+    isCompletingGoal,
+    setIsCompletingGoal,
+  ] = useState(false);
+
+  const [message, setMessage] = useState("");
+
   /* =========================
-     6. 页面加载：currentTeacher 准备好后读取主页业务数据
+     8. 页面加载
      ========================= */
 
   useEffect(() => {
-    let isMounted = true;
+    let isCancelled = false;
 
     async function loadPage() {
-      setIsLoadingTeacherData(true);
-      setMessage("");
-
       try {
-        const loadedPageData = await loadTeacherHomePageData(currentTeacher);
+        const loadedPageData =
+          await loadTeacherHomePageData(teacherId);
 
-        if (!isMounted) return;
+        if (isCancelled) return;
 
         setPageData(loadedPageData);
       } catch (error) {
-        if (!isMounted) return;
+        if (isCancelled) return;
 
-        const errorMessage =
-          error instanceof Error ? error.message : "读取小老师数据失败。";
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "读取小老师数据失败。"
+        );
 
-        setMessage(errorMessage);
         setPageData(null);
       } finally {
-        if (isMounted) {
+        if (!isCancelled) {
           setIsLoadingTeacherData(false);
         }
       }
     }
 
-    loadPage();
+    /**
+     * 初始 isLoadingTeacherData 已经是 true，
+     * 因此这里不重复 setIsLoadingTeacherData(true)。
+     */
+    void loadPage();
 
     return () => {
-      isMounted = false;
+      isCancelled = true;
     };
-  }, [currentTeacher]);
+  }, [teacherId]);
 
   /* =========================
-     7. 操作函数：结束一个教学目标
+     9. 结束教学目标
      ========================= */
 
   async function completeGoal(goalId: string) {
@@ -376,7 +605,7 @@ function TeacherHomeContent() {
         completed_at: new Date().toISOString(),
       })
       .eq("id", goalId)
-      .eq("teacher_id", currentTeacher.id)
+      .eq("teacher_id", teacherId)
       .neq("status", "completed");
 
     if (error) {
@@ -386,13 +615,16 @@ function TeacherHomeContent() {
     }
 
     setPageData((currentPageData) => {
-      if (!currentPageData) return currentPageData;
+      if (!currentPageData) {
+        return currentPageData;
+      }
 
       return {
         ...currentPageData,
-        goalsWithProgress: currentPageData.goalsWithProgress.filter(
-          (goal) => goal.id !== goalId
-        ),
+        goalsWithProgress:
+          currentPageData.goalsWithProgress.filter(
+            (goal) => goal.id !== goalId
+          ),
       };
     });
 
@@ -401,49 +633,76 @@ function TeacherHomeContent() {
   }
 
   /* =========================
-     8. 派生数据：把 pageData 整理成页面更好用的格式
+     10. 稳定的基础数据
      ========================= */
 
-  const teacherProfile = pageData?.teacher || {
-    id: currentTeacher.id,
-    name: currentTeacher.name,
-    email: currentTeacher.email || null,
-    subject: null,
-    status: null,
-  };
+  const teacherProfile: TeacherProfile =
+    pageData?.teacher ?? {
+      id: currentTeacher.id,
+      name: currentTeacher.name,
+      email: currentTeacher.email ?? null,
+      subject: null,
+      status: null,
+    };
 
-  const classRelations = pageData?.classRelations || [];
-  const studentsInClasses = pageData?.studentsInClasses || [];
-  const lessonRecords = pageData?.lessonRecords || [];
-  const goalsWithProgress = pageData?.goalsWithProgress || [];
+  const classRelations =
+    pageData?.classRelations ??
+    EMPTY_CLASS_RELATIONS;
 
+  const studentsInClasses =
+    pageData?.studentsInClasses ??
+    EMPTY_STUDENTS_IN_CLASSES;
+
+  const lessonRecords =
+    pageData?.lessonRecords ??
+    EMPTY_LESSON_RECORDS;
+
+  const goalsWithProgress =
+    pageData?.goalsWithProgress ?? EMPTY_GOALS;
+
+  /* =========================
+     11. 派生数据
+     ========================= */
+
+  /**
+   * 由于 ClassTeacherRelation.classes 已经保证存在，
+   * 不再需要 filter(Boolean)。
+   */
   const classes = useMemo(() => {
-    return classRelations
-      .map((relation) => relation.classes)
-      .filter((classItem): classItem is ClassRow => Boolean(classItem));
+    return classRelations.map(
+      (relation) => relation.classes
+    );
   }, [classRelations]);
 
   const currentClasses = useMemo(() => {
-    return classes.filter((classItem) => isCurrentClass(classItem));
+    return classes.filter(isCurrentClass);
   }, [classes]);
 
   const subjectConflictClasses = useMemo(() => {
     return currentClasses.filter((classItem) =>
-      hasClassSubjectConflict(teacherProfile.subject, classItem)
+      hasClassSubjectConflict(
+        teacherProfile.subject,
+        classItem
+      )
     );
   }, [currentClasses, teacherProfile.subject]);
 
   const currentClassIds = useMemo(() => {
-    return new Set(currentClasses.map((classItem) => classItem.id));
+    return new Set(
+      currentClasses.map(
+        (classItem) => classItem.id
+      )
+    );
   }, [currentClasses]);
 
   const classNameById = useMemo(() => {
     const map = new Map<string, string>();
 
     classRelations.forEach((relation) => {
-      if (relation.class_id && relation.classes?.name) {
-        map.set(relation.class_id, relation.classes.name);
-      }
+      map.set(
+        relation.class_id,
+        relation.classes.name
+      );
     });
 
     return map;
@@ -451,24 +710,35 @@ function TeacherHomeContent() {
 
   const currentStudents = useMemo(() => {
     const students = studentsInClasses
-      .filter((relation) => currentClassIds.has(relation.class_id))
+      .filter((relation) =>
+        currentClassIds.has(relation.class_id)
+      )
       .map((relation) => relation.students)
-      .filter((student): student is StudentRow => Boolean(student))
-      .filter((student) => isActiveStudent(student));
+      .filter(
+        (
+          student
+        ): student is StudentRow =>
+          student !== null
+      )
+      .filter(isActiveStudent);
 
     return uniqueStudentsById(students);
   }, [studentsInClasses, currentClassIds]);
 
   const currentClassNames = useMemo(() => {
-    return currentClasses.map((classItem) => classItem.name);
+    return currentClasses.map(
+      (classItem) => classItem.name
+    );
   }, [currentClasses]);
 
   const currentStudentNames = useMemo(() => {
-    return currentStudents.map((student) => student.name);
+    return currentStudents.map(
+      (student) => student.name
+    );
   }, [currentStudents]);
 
   /* =========================
-     9. 页面渲染
+     12. 页面渲染
      ========================= */
 
   return (
@@ -482,7 +752,9 @@ function TeacherHomeContent() {
 
         {isLoadingTeacherData ? (
           <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
-            <p className="text-sm text-stone-600">正在读取小老师数据...</p>
+            <p className="text-sm text-stone-600">
+              正在读取小老师数据...
+            </p>
           </section>
         ) : (
           <div className="grid gap-8 lg:grid-cols-[320px_1fr]">
@@ -490,7 +762,8 @@ function TeacherHomeContent() {
               <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm">
                 <div className="flex items-center gap-4">
                   <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#cfe8d6] text-xl font-bold text-emerald-950">
-                    {teacherProfile.name?.slice(0, 1) || "师"}
+                    {teacherProfile.name.slice(0, 1) ||
+                      "师"}
                   </div>
 
                   <div>
@@ -521,7 +794,9 @@ function TeacherHomeContent() {
                         teacherProfile.subject
                       )}`}
                     >
-                      {getSubjectLabel(teacherProfile.subject)}
+                      {getSubjectLabel(
+                        teacherProfile.subject
+                      )}
                     </span>
                   </p>
 
@@ -529,6 +804,7 @@ function TeacherHomeContent() {
                     <span className="font-semibold text-stone-800">
                       当前负责班级：
                     </span>
+
                     {currentClassNames.length > 0
                       ? currentClassNames.join("、")
                       : "暂无当前班级"}
@@ -538,6 +814,7 @@ function TeacherHomeContent() {
                     <span className="font-semibold text-stone-800">
                       当前学生：
                     </span>
+
                     {currentStudentNames.length > 0
                       ? currentStudentNames.join("、")
                       : "暂无当前学生"}
@@ -569,22 +846,34 @@ function TeacherHomeContent() {
                     </p>
                   ) : (
                     classes.map((classItem) => {
-                      const studentsForClass = studentsInClasses
-                        .filter(
-                          (relation) =>
-                            relation.class_id === classItem.id &&
-                            relation.students &&
-                            isActiveStudent(relation.students)
-                        )
-                        .map((relation) => relation.students)
-                        .filter(
-                          (student): student is StudentRow => Boolean(student)
-                        );
+                      const studentsForClass =
+                        studentsInClasses
+                          .filter(
+                            (relation) =>
+                              relation.class_id ===
+                                classItem.id &&
+                              relation.students !==
+                                null &&
+                              isActiveStudent(
+                                relation.students
+                              )
+                          )
+                          .map(
+                            (relation) =>
+                              relation.students
+                          )
+                          .filter(
+                            (
+                              student
+                            ): student is StudentRow =>
+                              student !== null
+                          );
 
-                      const hasSubjectConflict = hasClassSubjectConflict(
-                        teacherProfile.subject,
-                        classItem
-                      );
+                      const hasSubjectConflict =
+                        hasClassSubjectConflict(
+                          teacherProfile.subject,
+                          classItem
+                        );
 
                       return (
                         <div
@@ -598,11 +887,14 @@ function TeacherHomeContent() {
                               </p>
 
                               <p className="mt-1 text-xs text-stone-500">
-                                {classItem.cohorts?.name || "未设置届别"}
+                                {classItem.cohorts?.name ||
+                                  "未设置届别"}
                               </p>
                             </div>
 
-                            {!isCurrentClass(classItem) && (
+                            {!isCurrentClass(
+                              classItem
+                            ) && (
                               <span className="w-fit rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-500">
                                 已封存
                               </span>
@@ -612,33 +904,41 @@ function TeacherHomeContent() {
                           {hasSubjectConflict && (
                             <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
                               学科不一致：你的学科是
-                              {getSubjectLabel(teacherProfile.subject)}，这个班级是
-                              {getSubjectLabel(classItem.subject)}
+                              {getSubjectLabel(
+                                teacherProfile.subject
+                              )}
+                              ，这个班级是
+                              {getSubjectLabel(
+                                classItem.subject
+                              )}
                             </p>
                           )}
 
                           <div className="mt-3 space-y-2">
-                            {studentsForClass.length === 0 ? (
+                            {studentsForClass.length ===
+                            0 ? (
                               <p className="text-sm leading-6 text-stone-500">
                                 这个班级暂时没有学生。
                               </p>
                             ) : (
-                              studentsForClass.map((student) => (
-                                <div
-                                  key={student.id}
-                                  className="rounded-xl bg-[#f6f5e9] px-4 py-3"
-                                >
-                                  <p className="text-sm font-semibold text-emerald-950">
-                                    {student.name}
-                                  </p>
-
-                                  {student.note && (
-                                    <p className="mt-1 text-xs leading-5 text-stone-500">
-                                      {student.note}
+                              studentsForClass.map(
+                                (student) => (
+                                  <div
+                                    key={student.id}
+                                    className="rounded-xl bg-[#f6f5e9] px-4 py-3"
+                                  >
+                                    <p className="text-sm font-semibold text-emerald-950">
+                                      {student.name}
                                     </p>
-                                  )}
-                                </div>
-                              ))
+
+                                    {student.note && (
+                                      <p className="mt-1 text-xs leading-5 text-stone-500">
+                                        {student.note}
+                                      </p>
+                                    )}
+                                  </div>
+                                )
+                              )
                             )}
                           </div>
                         </div>
@@ -680,17 +980,13 @@ function TeacherHomeContent() {
 
             <section className="space-y-8">
               <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
-                <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
-                  <div>
-                    <h2 className="text-3xl font-bold text-emerald-950">
-                      当前教学目标
-                    </h2>
+                <h2 className="text-3xl font-bold text-emerald-950">
+                  当前教学目标
+                </h2>
 
-                    <p className="mt-3 leading-7 text-stone-600">
-                      这里显示还在进行中的阶段目标。结束后的目标会进入全部目标记录。
-                    </p>
-                  </div>
-                </div>
+                <p className="mt-3 leading-7 text-stone-600">
+                  这里显示还在进行中的阶段目标。结束后的目标会进入全部目标记录。
+                </p>
 
                 <div className="mt-8">
                   {goalsWithProgress.length === 0 ? (
@@ -709,15 +1005,20 @@ function TeacherHomeContent() {
                   ) : (
                     <div className="space-y-4">
                       {goalsWithProgress.map((goal) => {
-                        const expectedLessons = goal.expected_lessons || 0;
-                        const completedLessons = goal.completed_lessons;
+                        const expectedLessons =
+                          goal.expected_lessons ?? 0;
+
+                        const completedLessons =
+                          goal.completed_lessons;
 
                         const progressPercent =
                           expectedLessons > 0
                             ? Math.min(
                                 100,
                                 Math.round(
-                                  (completedLessons / expectedLessons) * 100
+                                  (completedLessons /
+                                    expectedLessons) *
+                                    100
                                 )
                               )
                             : 0;
@@ -735,8 +1036,9 @@ function TeacherHomeContent() {
 
                                 {goal.class_id && (
                                   <p className="mt-2 text-sm font-semibold text-emerald-700">
-                                    {classNameById.get(goal.class_id) ||
-                                      "未知班级"}
+                                    {classNameById.get(
+                                      goal.class_id
+                                    ) || "未知班级"}
                                   </p>
                                 )}
                               </div>
@@ -751,7 +1053,9 @@ function TeacherHomeContent() {
 
                                 <button
                                   type="button"
-                                  onClick={() => completeGoal(goal.id)}
+                                  onClick={() =>
+                                    completeGoal(goal.id)
+                                  }
                                   disabled={isCompletingGoal}
                                   className="rounded-full border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
@@ -779,14 +1083,16 @@ function TeacherHomeContent() {
                               <span>
                                 当前进度：
                                 <strong className="font-semibold text-stone-700">
-                                  {completedLessons} / {expectedLessons || "?"} 节
+                                  {completedLessons} /{" "}
+                                  {expectedLessons || "?"} 节
                                 </strong>
                               </span>
 
                               <span>
                                 开始日期：
                                 <strong className="font-semibold text-stone-700">
-                                  {goal.start_date || "未设置"}
+                                  {goal.start_date ||
+                                    "未设置"}
                                 </strong>
                               </span>
                             </div>
@@ -794,14 +1100,17 @@ function TeacherHomeContent() {
                             <div className="mt-4 h-2 overflow-hidden rounded-full bg-emerald-100">
                               <div
                                 className="h-full rounded-full bg-[#2f5d50]"
-                                style={{ width: `${progressPercent}%` }}
+                                style={{
+                                  width: `${progressPercent}%`,
+                                }}
                               />
                             </div>
 
                             <p className="mt-2 text-xs text-stone-500">
                               已完成 {progressPercent}%。
                               {expectedLessons > 0 &&
-                              completedLessons > expectedLessons
+                              completedLessons >
+                                expectedLessons
                                 ? " 实际课次已经超过原计划，可以考虑修改计划课次。"
                                 : ""}
                             </p>
@@ -849,7 +1158,8 @@ function TeacherHomeContent() {
                         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
                           <div>
                             <p className="text-sm font-semibold text-emerald-700">
-                              {record.lesson_date}｜{record.duration_minutes} 分钟
+                              {record.lesson_date}｜
+                              {record.duration_minutes} 分钟
                             </p>
 
                             <h3 className="mt-2 text-2xl font-bold text-emerald-950">
@@ -859,14 +1169,17 @@ function TeacherHomeContent() {
 
                           <p className="w-fit rounded-full bg-[#f6f5e9] px-4 py-2 text-sm font-semibold text-stone-600">
                             {record.class_id
-                              ? classNameById.get(record.class_id) ||
-                                "未知班级"
+                              ? classNameById.get(
+                                  record.class_id
+                                ) || "未知班级"
                               : "未关联班级"}
                           </p>
                         </div>
 
                         <p className="mt-4 whitespace-pre-line leading-8 text-stone-700">
-                          {record.lesson_content_and_feedback}
+                          {
+                            record.lesson_content_and_feedback
+                          }
                         </p>
                       </article>
                     ))

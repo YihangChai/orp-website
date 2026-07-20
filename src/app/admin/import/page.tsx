@@ -12,7 +12,6 @@ import type {
   BulkImportReuseCandidate,
   ImportValidationError,
   PreviewImportRow,
-  SubjectCode,
 } from "@/lib/admin-import/types";
 
 const sampleText = `届别	班级名称	合作学校	学科	小老师姓名	小老师邮箱后缀	学生名单	学生年级
@@ -848,6 +847,135 @@ function ArchivedReuseConfirmationPanel({
   );
 }
 
+type ImportStatsBoxProps = {
+  result: BulkImportResult;
+};
+
+function ImportStatsBox({ result }: ImportStatsBoxProps) {
+  return (
+    <div className="mt-5 rounded-2xl border border-amber-100 bg-white p-4">
+      <p className="text-sm font-bold text-amber-900">本次导入统计</p>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-6">
+        <div className="rounded-2xl bg-[#fffdf4] p-4">
+          <p className="text-sm text-stone-500">创建班级</p>
+          <p className="mt-1 text-3xl font-bold text-emerald-950">
+            {result.createdClasses}
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-[#fffdf4] p-4">
+          <p className="text-sm text-stone-500">创建小老师</p>
+          <p className="mt-1 text-3xl font-bold text-emerald-950">
+            {result.createdTeachers}
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-[#fffdf4] p-4">
+          <p className="text-sm text-stone-500">创建学生</p>
+          <p className="mt-1 text-3xl font-bold text-emerald-950">
+            {result.createdStudents}
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-[#fffdf4] p-4">
+          <p className="text-sm text-stone-500">恢复账号</p>
+          <p className="mt-1 text-3xl font-bold text-amber-800">
+            {result.restoredAccounts || 0}
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-[#fffdf4] p-4">
+          <p className="text-sm text-stone-500">跳过已存在</p>
+          <p className="mt-1 text-3xl font-bold text-emerald-950">
+            {result.skippedExisting}
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-[#fffdf4] p-4">
+          <p className="text-sm text-stone-500">失败</p>
+          <p className="mt-1 text-3xl font-bold text-red-700">
+            {result.failed}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+          <p className="text-sm text-stone-500">老师班级绑定</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-950">
+            {result.teacherBindings}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+          <p className="text-sm text-stone-500">学生班级绑定</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-950">
+            {result.studentBindings}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type AccountSummaryListProps = {
+  title: string;
+  description: string;
+  accounts: BulkImportResult["accounts"];
+  tone: "amber" | "stone" | "red";
+};
+
+function AccountSummaryList({
+  title,
+  description,
+  accounts,
+  tone,
+}: AccountSummaryListProps) {
+  const wrapperClass =
+    tone === "red"
+      ? "border-red-100 bg-red-50"
+      : tone === "amber"
+        ? "border-amber-100 bg-amber-50"
+        : "border-stone-100 bg-[#fffdf4]";
+
+  const titleClass =
+    tone === "red"
+      ? "text-red-700"
+      : tone === "amber"
+        ? "text-amber-900"
+        : "text-stone-800";
+
+  const textClass =
+    tone === "red"
+      ? "text-red-700"
+      : tone === "amber"
+        ? "text-amber-900"
+        : "text-stone-700";
+
+  return (
+    <div className={`mt-6 rounded-2xl border p-4 ${wrapperClass}`}>
+      <p className={`text-sm font-bold ${titleClass}`}>{title}</p>
+
+      <p className="mt-2 text-sm leading-7 text-stone-600">{description}</p>
+
+      <div className="mt-3 space-y-2">
+        {accounts.map((account, index) => (
+          <p
+            key={`${account.role}-${account.loginAccount}-${index}`}
+            className={`text-sm ${textClass}`}
+          >
+            {account.role === "teacher" ? "小老师" : "学生"}：
+            {account.name}（{account.loginAccount || "无账号"}）-
+            {account.className} - {getSubjectLabel(account.subject)}
+            {account.message ? `：${account.message}` : ""}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type ImportResultPanelProps = {
   result: BulkImportResult;
 };
@@ -892,25 +1020,26 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
 
   async function handleCopyAccounts() {
     if (createdAccounts.length === 0) {
-      alert("本次没有新创建账号，因此没有可复制的初始密码。");
+      window.alert("本次没有新创建账号，因此没有可复制的初始密码。");
       return;
     }
 
     try {
       await navigator.clipboard.writeText(buildAccountText());
-      alert("账号清单已复制。请粘贴到安全的位置保存。");
+      window.alert("账号清单已复制。请粘贴到安全的位置保存。");
     } catch {
-      alert("复制失败。请手动选中表格内容复制。");
+      window.alert("复制失败。请手动选中表格内容复制。");
     }
   }
 
   function handleDownloadAccounts() {
     if (createdAccounts.length === 0) {
-      alert("本次没有新创建账号，因此没有可下载的初始密码。");
+      window.alert("本次没有新创建账号，因此没有可下载的初始密码。");
       return;
     }
 
     const content = buildAccountText();
+
     const blob = new Blob([content], {
       type: "text/plain;charset=utf-8",
     });
@@ -925,132 +1054,12 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
 
     link.href = url;
     link.download = `orp-accounts-${timestamp}.txt`;
+
+    document.body.appendChild(link);
     link.click();
+    link.remove();
 
     URL.revokeObjectURL(url);
-  }
-
-  function ImportStatsBox() {
-    return (
-      <div className="mt-5 rounded-2xl border border-amber-100 bg-white p-4">
-        <p className="text-sm font-bold text-amber-900">本次导入统计</p>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-6">
-          <div className="rounded-2xl bg-[#fffdf4] p-4">
-            <p className="text-sm text-stone-500">创建班级</p>
-            <p className="mt-1 text-3xl font-bold text-emerald-950">
-              {result.createdClasses}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-[#fffdf4] p-4">
-            <p className="text-sm text-stone-500">创建小老师</p>
-            <p className="mt-1 text-3xl font-bold text-emerald-950">
-              {result.createdTeachers}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-[#fffdf4] p-4">
-            <p className="text-sm text-stone-500">创建学生</p>
-            <p className="mt-1 text-3xl font-bold text-emerald-950">
-              {result.createdStudents}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-[#fffdf4] p-4">
-            <p className="text-sm text-stone-500">恢复账号</p>
-            <p className="mt-1 text-3xl font-bold text-amber-800">
-              {result.restoredAccounts || 0}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-[#fffdf4] p-4">
-            <p className="text-sm text-stone-500">跳过已存在</p>
-            <p className="mt-1 text-3xl font-bold text-emerald-950">
-              {result.skippedExisting}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-[#fffdf4] p-4">
-            <p className="text-sm text-stone-500">失败</p>
-            <p className="mt-1 text-3xl font-bold text-red-700">
-              {result.failed}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl border border-emerald-100 bg-white p-4">
-            <p className="text-sm text-stone-500">老师班级绑定</p>
-            <p className="mt-1 text-2xl font-bold text-emerald-950">
-              {result.teacherBindings}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-100 bg-white p-4">
-            <p className="text-sm text-stone-500">学生班级绑定</p>
-            <p className="mt-1 text-2xl font-bold text-emerald-950">
-              {result.studentBindings}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function AccountSummaryList({
-    title,
-    description,
-    accounts,
-    tone,
-  }: {
-    title: string;
-    description: string;
-    accounts: typeof result.accounts;
-    tone: "amber" | "stone" | "red";
-  }) {
-    const wrapperClass =
-      tone === "red"
-        ? "border-red-100 bg-red-50"
-        : tone === "amber"
-        ? "border-amber-100 bg-amber-50"
-        : "border-stone-100 bg-[#fffdf4]";
-
-    const titleClass =
-      tone === "red"
-        ? "text-red-700"
-        : tone === "amber"
-        ? "text-amber-900"
-        : "text-stone-800";
-
-    const textClass =
-      tone === "red"
-        ? "text-red-700"
-        : tone === "amber"
-        ? "text-amber-900"
-        : "text-stone-700";
-
-    return (
-      <div className={`mt-6 rounded-2xl border p-4 ${wrapperClass}`}>
-        <p className={`text-sm font-bold ${titleClass}`}>{title}</p>
-
-        <p className="mt-2 text-sm leading-7 text-stone-600">{description}</p>
-
-        <div className="mt-3 space-y-2">
-          {accounts.map((account, index) => (
-            <p
-              key={`${account.role}-${account.loginAccount}-${index}`}
-              className={`text-sm ${textClass}`}
-            >
-              {account.role === "teacher" ? "小老师" : "学生"}：
-              {account.name}（{account.loginAccount || "无账号"}）-
-              {account.className} - {getSubjectLabel(account.subject)}
-              {account.message ? `：${account.message}` : ""}
-            </p>
-          ))}
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -1109,7 +1118,7 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
             </div>
           </div>
 
-          <ImportStatsBox />
+          <ImportStatsBox result={result} />
 
           <div className="mt-4 overflow-x-auto rounded-2xl border border-amber-100 bg-white">
             <table className="w-full min-w-[980px] border-collapse text-left text-sm">
@@ -1175,7 +1184,7 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
             系统没有生成新的初始密码。可能是因为本次导入的老师或学生账号之前已经存在，系统复用了已有账号，或者恢复了已封存账号。
           </p>
 
-          <ImportStatsBox />
+          <ImportStatsBox result={result} />
         </div>
       )}
 
