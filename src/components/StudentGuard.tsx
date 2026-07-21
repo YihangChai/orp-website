@@ -167,6 +167,7 @@ export default function StudentGuard({ children }: StudentGuardProps) {
     };
   }, []);
 
+
   if (isCheckingStudent) {
     return (
       <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
