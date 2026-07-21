@@ -733,7 +733,7 @@ function AdminStudentsContent() {
           <div className="flex flex-wrap gap-2">
             <Link
               href="/admin/maintenance"
-              className="w-fit rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900"
+              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
             >
               进入维护中心
             </Link>

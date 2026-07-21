@@ -835,10 +835,6 @@ function AdminHomeContent() {
             管理后台
           </h1>
 
-          <p className="mt-3 text-xs leading-6 text-stone-500">
-            管理班级、成员、课程记录和留言反馈。
-          </p>
-
           <nav className="mt-6 space-y-2 text-sm">
             {navItems.map(([label, href]) => (
               <Link
@@ -1014,11 +1010,6 @@ function AdminHomeContent() {
                 <h2 className="text-xl font-bold text-emerald-950">
                   待处理问题
                 </h2>
-
-                <p className="mt-2 text-sm leading-7 text-stone-600">
-                  MVP 阶段这里先显示高风险操作申请，例如删除班级申请、整届封存申请。系统报错工单可以等
-                  MVP 完成后再做。
-                </p>
               </div>
 
               <span className="w-fit rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">

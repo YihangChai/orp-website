@@ -1,1176 +1,694 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import AdminGuard from "@/components/AdminGuard";
+import TeacherGuard, { useCurrentTeacher } from "@/components/TeacherGuard";
+import type { CurrentTeacher } from "@/lib/auth";
 
 /**
- * admin/teachers/[teacherId] 页面原则：
- * 1. AdminGuard 负责确认管理员身份。
- * 2. 本页面只读单个小老师的教学档案，不做维护操作。
- * 3. 小老师账号封存、恢复、密码重置、班级关系调整统一放到维护中心。
- *
- * 学科展示原则：
- * - 老师学科是这个详情页的核心身份字段，标题和基本信息里显示。
- * - 负责班级卡片显示班级学科，用来检查老师与班级学科是否一致。
- * - 如果老师缺少学科，或老师学科与班级学科冲突，显示维护提示。
+ * teacher/new-record 页面原则：
+ * 1. TeacherGuard 负责确认当前小老师身份。
+ * 2. 本页面只读取“添加授课记录”需要的业务数据。
+ * 3. 本页面不再调用 getCurrentTeacher，避免重复身份查询。
+ * 4. 保存课程记录时，同时写入 teacher_id、class_id、goal_id 和学生出勤。
  */
 
-type TeacherRecord = {
-  id: string;
-  name: string;
-  email: string | null;
-  subject: string | null;
-  status: string | null;
-  created_at: string;
-};
-
-/**
- * 以下类型描述 Supabase 嵌套关系的真实结构，
- * 用明确类型替代原来的 any。
- */
-type RelatedCohort = {
-  id: string;
-  name: string;
-  status: string | null;
-};
-
-type RelatedStudent = {
-  id: string;
-  name: string;
-  status: string | null;
-  grade: string | null;
-};
-
-type ClassStudentRelation = {
-  student_id: string;
-  students: RelatedStudent | RelatedStudent[] | null;
-};
-
-type RelatedClass = {
-  id: string;
-  name: string;
-  school: string | null;
-  subject: string | null;
-  status: string | null;
-  cohort_id: string | null;
-  cohorts: RelatedCohort | RelatedCohort[] | null;
-  class_students:
-    | ClassStudentRelation
-    | ClassStudentRelation[]
-    | null;
-};
-
-type ClassRelation = {
-  class_id: string;
-  classes: RelatedClass | RelatedClass[] | null;
-};
-
-type ClassSummary = {
-  id: string;
-  name: string;
-  school: string | null;
-  subject: string | null;
-  status: string | null;
-  cohortName: string;
-  studentCount: number;
-};
+/* =========================
+   1. 类型定义：描述页面会用到的数据结构
+   ========================= */
 
 type TeachingGoal = {
   id: string;
   class_id: string | null;
   title: string;
-  description: string | null;
   expected_lessons: number | null;
-  status: string | null;
-  created_at: string;
 };
 
-type LessonRecord = {
+type ClassItem = {
   id: string;
-  teacher_id: string | null;
-  class_id: string | null;
-  goal_id: string | null;
-  lesson_date: string;
-  duration_minutes: number;
-  lesson_title: string;
-  lesson_content_and_feedback: string;
-  homework: string | null;
-  next_plan: string | null;
-  material_link: string | null;
-  teacher_reflection: string | null;
-  created_at: string;
-};
-
-type TeacherDetailData = {
-  teacher: TeacherRecord;
-  classRelations: ClassRelation[];
-  teachingGoals: TeachingGoal[];
-  lessonRecords: LessonRecord[];
-};
-
-/**
- * Supabase 的嵌套关系有时是对象，有时是数组。
- * getOne 统一取得一个对象。
- */
-function getOne<T>(value: T | T[] | null | undefined): T | null {
-  if (!value) return null;
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value;
-}
-
-/**
- * getMany 统一把对象、数组或 null 转换为数组。
- */
-function getMany<T>(value: T | T[] | null | undefined): T[] {
-  if (!value) return [];
-  if (Array.isArray(value)) return value;
-  return [value];
-}
-
-function getSubjectLabel(subject: string | null | undefined) {
-  if (subject === "english") return "英语";
-  if (subject === "math") return "数学";
-  return "未设置";
-}
-
-function getSubjectClassName(subject: string | null | undefined) {
-  if (subject === "english") return "bg-sky-50 text-sky-700";
-  if (subject === "math") return "bg-violet-50 text-violet-700";
-  return "bg-stone-100 text-stone-500";
-}
-
-function getTeacherStatusLabel(status: string) {
-  if (status === "active") return "当前";
-  if (status === "archived") return "已归档";
-  if (status === "withdrawn") return "已退出";
-  if (status === "delete_requested") return "待维护";
-  return status;
-}
-
-function getTeacherStatusClassName(status: string) {
-  if (status === "active") return "bg-emerald-50 text-emerald-700";
-  if (status === "archived") return "bg-stone-100 text-stone-500";
-  if (status === "withdrawn") return "bg-amber-50 text-amber-700";
-  if (status === "delete_requested") return "bg-red-50 text-red-700";
-  return "bg-stone-100 text-stone-500";
-}
-
-function getGoalStatusLabel(status: string | null) {
-  if (status === "active") return "进行中";
-  if (status === "completed") return "已完成";
-  if (status === "paused") return "已暂停";
-  if (status === "archived") return "已归档";
-  return "未设置";
-}
-
-function getGoalStatusClassName(status: string | null) {
-  if (status === "active") return "bg-emerald-50 text-emerald-700";
-  if (status === "completed") return "bg-blue-50 text-blue-700";
-  if (status === "paused") return "bg-amber-50 text-amber-700";
-  if (status === "archived") return "bg-stone-100 text-stone-500";
-  return "bg-stone-100 text-stone-500";
-}
-
-function getClassStatusLabel(status: string | null | undefined) {
-  if (status === "active") return "运行中";
-  if (status === "archived") return "已封存";
-  if (status === "completed") return "已完成";
-  return "未知状态";
-}
-
-function getClassStatusClassName(status: string | null | undefined) {
-  if (status === "active") return "bg-emerald-50 text-emerald-700";
-
-  if (status === "archived" || status === "completed") {
-    return "bg-stone-100 text-stone-500";
-  }
-
-  return "bg-amber-50 text-amber-700";
-}
-
-function isMaintenanceTeacher(params: {
+  name: string;
+  school: string | null;
   status: string;
-  classCount: number;
-  subject: string | null;
-  hasSubjectConflict: boolean;
-}) {
+};
+
+type ClassTeacherRelation = {
+  class_id: string;
+  classes: ClassItem | ClassItem[] | null;
+};
+
+type ClassStudentItem = {
+  id: string;
+  name: string;
+  note: string | null;
+  status: string;
+};
+
+type ClassStudentRelation = {
+  students: ClassStudentItem | null;
+};
+
+type NewRecordPageData = {
+  classes: ClassItem[];
+  selectedClassId: string;
+  goals: TeachingGoal[];
+  students: ClassStudentItem[];
+};
+
+/* =========================
+   2. 工具函数：生成今天日期，作为默认上课日期
+   ========================= */
+
+function getTodayDate() {
+  const today = new Date();
+  return today.toISOString().split("T")[0];
+}
+
+/* =========================
+   3. 页面外壳：只负责套 TeacherGuard
+   ========================= */
+
+export default function NewRecordPage() {
   return (
-    (params.status !== "active" && params.status !== "archived") ||
-    (params.status === "active" && params.classCount === 0) ||
-    (params.status === "active" && !params.subject) ||
-    params.hasSubjectConflict
+    <TeacherGuard>
+      <NewRecordContent />
+    </TeacherGuard>
   );
 }
 
-function isWithinRecentThirtyDays(dateString: string) {
-  const lessonDate = new Date(dateString);
-  const today = new Date();
-  const thirtyDaysAgo = new Date();
+/* =========================
+   4. 页面主体：添加授课记录
+   ========================= */
 
-  thirtyDaysAgo.setDate(today.getDate() - 30);
-  thirtyDaysAgo.setHours(0, 0, 0, 0);
+function NewRecordContent() {
+  const router = useRouter();
+  const today = getTodayDate();
 
-  return lessonDate >= thirtyDaysAgo && lessonDate <= today;
-}
+  /**
+   * currentTeacher 来自 TeacherGuard。
+   * 这里不会再次访问数据库确认老师身份。
+   */
+  const currentTeacher = useCurrentTeacher();
 
-function getMondayKey(dateString: string) {
-  const date = new Date(dateString);
-  const monday = new Date(date);
+  const [pageData, setPageData] = useState<NewRecordPageData | null>(null);
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>(
+    {}
+  );
 
-  const day = monday.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
 
-  monday.setDate(date.getDate() + diffToMonday);
-  monday.setHours(0, 0, 0, 0);
+  /* =========================
+     5. 数据读取函数：读取班级、学生、当前目标
+     ========================= */
 
-  return monday.toISOString().slice(0, 10);
-}
-
-function getRecentFourWeeksCount(lessons: LessonRecord[]) {
-  const today = new Date();
-  const fourWeeksAgo = new Date();
-
-  fourWeeksAgo.setDate(today.getDate() - 28);
-  fourWeeksAgo.setHours(0, 0, 0, 0);
-
-  const recentLessons = lessons.filter((lesson) => {
-    const lessonDate = new Date(lesson.lesson_date);
-
-    return lessonDate >= fourWeeksAgo && lessonDate <= today;
-  });
-
-  const weekKeys = new Set<string>();
-
-  recentLessons.forEach((lesson) => {
-    weekKeys.add(getMondayKey(lesson.lesson_date));
-  });
-
-  return weekKeys.size;
-}
-
-function formatHours(minutes: number) {
-  return Math.round((minutes / 60) * 10) / 10;
-}
-
-function hasSubjectConflict(
-  teacherSubject: string | null,
-  classSummaries: ClassSummary[]
-) {
-  if (!teacherSubject) return false;
-
-  return classSummaries.some((classSummary) => {
-    if (!classSummary.subject) return false;
-    return classSummary.subject !== teacherSubject;
-  });
-}
-
-function getAttentionLabel({
-  status,
-  subject,
-  classCount,
-  lessonCount,
-  recentThirtyDaysLessonCount,
-  recentFourWeeksCount,
-  hasSubjectConflict,
-}: {
-  status: string;
-  subject: string | null;
-  classCount: number;
-  lessonCount: number;
-  recentThirtyDaysLessonCount: number;
-  recentFourWeeksCount: number;
-  hasSubjectConflict: boolean;
-}) {
-  if (status === "archived") {
-    return {
-      text: "已归档",
-      className: "bg-stone-100 text-stone-500",
-      description: "这个小老师属于历史数据，通常不再参与当前运营。",
-    };
-  }
-
-  if (status !== "active") {
-    return {
-      text: "待维护：状态异常",
-      className: "bg-red-50 text-red-700",
-      description:
-        "这个小老师的状态不是 active / archived，需要在维护中心检查。",
-    };
-  }
-
-  if (!subject) {
-    return {
-      text: "待维护：缺少学科",
-      className: "bg-red-50 text-red-700",
-      description:
-        "这个小老师账号缺少教学学科。按照当前规则，一个小老师只能对应一个学科，需要在维护中心补全。",
-    };
-  }
-
-  if (hasSubjectConflict) {
-    return {
-      text: "待维护：学科不一致",
-      className: "bg-red-50 text-red-700",
-      description:
-        "这个小老师的教学学科和负责班级的学科不一致。需要检查是绑定错误，还是历史数据没有同步。",
-    };
-  }
-
-  if (classCount === 0) {
-    return {
-      text: "待维护：未分配班级",
-      className: "bg-red-50 text-red-700",
-      description:
-        "这个小老师账号存在，但没有绑定任何班级，需要在维护中心重新加入班级或处理异常数据。",
-    };
-  }
-
-  if (lessonCount === 0) {
-    return {
-      text: "暂无课程",
-      className: "bg-stone-100 text-stone-500",
-      description: "这个小老师目前还没有课程记录。",
-    };
-  }
-
-  if (recentThirtyDaysLessonCount === 0) {
-    return {
-      text: "近 30 天无课",
-      className: "bg-amber-50 text-amber-700",
-      description: "这个小老师过去有课程记录，但近 30 天没有新的课程记录。",
-    };
-  }
-
-  if (recentFourWeeksCount < 2) {
-    return {
-      text: "频率偏低",
-      className: "bg-amber-50 text-amber-700",
-      description:
-        "这个小老师近 4 周活跃周数偏少，可以结合班级情况判断是否需要跟进。",
-    };
-  }
-
-  return {
-    text: "正常",
-    className: "bg-emerald-50 text-emerald-700",
-    description: "该小老师目前有课程记录，近期教学活跃情况没有明显异常。",
-  };
-}
-
-/**
- * 查询并整理老师详情数据。
- * 这个函数只负责访问数据库并返回数据，不直接修改 React state。
- */
-async function fetchTeacherDetailData(
-  teacherId: string
-): Promise<TeacherDetailData> {
-  const { data: teacherData, error: teacherError } = await supabase
-    .from("teachers")
-    .select("id, name, email, subject, status, created_at")
-    .eq("id", teacherId)
-    .maybeSingle();
-
-  if (teacherError) {
-    throw new Error(`读取小老师资料失败：${teacherError.message}`);
-  }
-
-  if (!teacherData) {
-    throw new Error(
-      "没有找到这个小老师。可能这个小老师已经被删除，或者链接里的 ID 不正确。"
-    );
-  }
-
-  const teacher = teacherData as TeacherRecord;
-
-  const { data: classRelationsData, error: classRelationError } =
-    await supabase
+  async function loadNewRecordPageData(
+    activeTeacher: CurrentTeacher
+  ): Promise<NewRecordPageData> {
+    /**
+     * 第一步：读取当前小老师负责的班级。
+     * 当前版本默认使用第一个未归档班级。
+     * 后续如果正式支持一个老师多个班级，可以升级为班级下拉选择。
+     */
+    const { data: classTeacherData, error: classTeacherError } = await supabase
       .from("class_teachers")
       .select(
         `
-          class_id,
-          classes (
+        class_id,
+        classes (
+          id,
+          name,
+          school,
+          status
+        )
+      `
+      )
+      .eq("teacher_id", activeTeacher.id);
+
+    if (classTeacherError) {
+      throw new Error(`读取小老师班级失败：${classTeacherError.message}`);
+    }
+
+    const classRelations = (
+      (classTeacherData || []) as unknown as ClassTeacherRelation[]
+    );
+
+    const classes = classRelations
+      .map((relation) => {
+        if (!relation.classes) return null;
+
+        return Array.isArray(relation.classes)
+          ? relation.classes[0] || null
+          : relation.classes;
+      })
+      .filter((classItem): classItem is ClassItem => Boolean(classItem))
+      .filter((classItem) => classItem.status !== "archived");
+
+    const selectedClass = classes[0];
+
+    if (!selectedClass) {
+      throw new Error(
+        "这个小老师还没有绑定班级。请先在管理员端为小老师分配班级。"
+      );
+    }
+
+    /**
+     * 第二步：并行读取当前班级学生和当前班级正在进行的教学目标。
+     * 这两个查询互不依赖，所以可以同时读取。
+     */
+    const [studentsResult, goalsResult] = await Promise.all([
+      supabase
+        .from("class_students")
+        .select(
+          `
+          students (
             id,
             name,
-            school,
-            subject,
-            status,
-            cohort_id,
-            cohorts (
-              id,
-              name,
-              status
-            ),
-            class_students (
-              student_id,
-              students (
-                id,
-                name,
-                status,
-                grade
-              )
-            )
+            note,
+            status
           )
         `
-      )
-      .eq("teacher_id", teacherId);
+        )
+        .eq("class_id", selectedClass.id),
 
-  if (classRelationError) {
-    throw new Error(`读取班级关系失败：${classRelationError.message}`);
-  }
+      supabase
+        .from("teaching_goals")
+        .select("id, class_id, title, expected_lessons")
+        .eq("teacher_id", activeTeacher.id)
+        .eq("class_id", selectedClass.id)
+        .eq("status", "active")
+        .order("created_at", { ascending: false }),
+    ]);
 
-  const classRelations =
-    (classRelationsData ?? []) as unknown as ClassRelation[];
+    if (studentsResult.error) {
+      throw new Error(`读取学生名单失败：${studentsResult.error.message}`);
+    }
 
-  const classIds = classRelations
-    .map((relation) => relation.class_id)
-    .filter((classId): classId is string => Boolean(classId));
+    if (goalsResult.error) {
+      throw new Error(`读取教学目标失败：${goalsResult.error.message}`);
+    }
 
-  const goalRequest =
-    classIds.length > 0
-      ? supabase
-          .from("teaching_goals")
-          .select(
-            "id, class_id, title, description, expected_lessons, status, created_at"
-          )
-          .in("class_id", classIds)
-          .order("created_at", { ascending: false })
-      : Promise.resolve({
-          data: [] as TeachingGoal[],
-          error: null,
-        });
-
-  const lessonRequest = supabase
-    .from("lesson_records")
-    .select(
-      "id, teacher_id, class_id, goal_id, lesson_date, duration_minutes, lesson_title, lesson_content_and_feedback, homework, next_plan, material_link, teacher_reflection, created_at"
+    const students = (
+      (studentsResult.data || []) as unknown as ClassStudentRelation[]
     )
-    .eq("teacher_id", teacherId)
-    .order("lesson_date", { ascending: false });
+      .map((relation) => relation.students)
+      .filter((student): student is ClassStudentItem => Boolean(student))
+      .filter((student) => student.status !== "withdrawn")
+      .filter((student) => student.status !== "archived");
 
-  const [goalResult, lessonResult] = await Promise.all([
-    goalRequest,
-    lessonRequest,
-  ]);
+    const goals = (goalsResult.data || []) as TeachingGoal[];
 
-  if (goalResult.error) {
-    throw new Error(`读取学习目标失败：${goalResult.error.message}`);
+    return {
+      classes,
+      selectedClassId: selectedClass.id,
+      students,
+      goals,
+    };
   }
 
-  if (lessonResult.error) {
-    throw new Error(`读取课程记录失败：${lessonResult.error.message}`);
-  }
+  /* =========================
+     6. 页面加载：currentTeacher 准备好后读取业务数据
+     ========================= */
 
-  return {
-    teacher,
-    classRelations,
-    teachingGoals: (goalResult.data ?? []) as TeachingGoal[],
-    lessonRecords: (lessonResult.data ?? []) as LessonRecord[],
-  };
-}
-
-export default function TeacherDetailPage() {
-  return (
-    <AdminGuard>
-      <TeacherDetailContent />
-    </AdminGuard>
-  );
-}
-
-function TeacherDetailContent() {
-  const params = useParams<{ teacherId: string }>();
-  const teacherId = params.teacherId;
-
-  const [detailData, setDetailData] =
-    useState<TeacherDetailData | null>(null);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [message, setMessage] = useState("");
-
-  const [showAllGoals, setShowAllGoals] = useState(false);
-  const [showAllLessons, setShowAllLessons] = useState(false);
-
-  /**
-   * teacherId 变化时重新读取老师详情。
-   * isLoading 初始值已经是 true，因此 effect 开始时不重复设置。
-   */
   useEffect(() => {
-    let isCancelled = false;
+    let isMounted = true;
 
-    async function loadTeacherDetail() {
-      if (!teacherId) {
-        if (!isCancelled) {
-          setMessage("链接中缺少小老师 ID。");
-          setIsLoading(false);
-        }
-
-        return;
-      }
+    async function loadPage() {
+      setIsLoading(true);
+      setMessage("");
 
       try {
-        const loadedData = await fetchTeacherDetailData(teacherId);
+        const loadedPageData = await loadNewRecordPageData(currentTeacher);
 
-        if (isCancelled) {
-          return;
-        }
+        if (!isMounted) return;
 
-        setDetailData(loadedData);
+        setPageData(loadedPageData);
+
+        /**
+         * 默认所有学生都出勤。
+         * 小老师只需要取消未出勤学生的勾选。
+         */
+        const initialAttendanceMap: Record<string, boolean> = {};
+
+        loadedPageData.students.forEach((student) => {
+          initialAttendanceMap[student.id] = true;
+        });
+
+        setAttendanceMap(initialAttendanceMap);
       } catch (error) {
-        if (isCancelled) {
-          return;
-        }
+        if (!isMounted) return;
 
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "读取小老师详情失败。"
-        );
+        const errorMessage =
+          error instanceof Error ? error.message : "读取小老师信息失败。";
+
+        setMessage(errorMessage);
+        setPageData(null);
+        setAttendanceMap({});
       } finally {
-        if (!isCancelled) {
+        if (isMounted) {
           setIsLoading(false);
         }
       }
     }
 
-    void loadTeacherDetail();
+    loadPage();
 
     return () => {
-      isCancelled = true;
+      isMounted = false;
     };
-  }, [teacherId]);
+  }, [currentTeacher]);
 
-  const computed = useMemo(() => {
-    if (!detailData) return null;
+  /* =========================
+     7. 提交函数：保存课程记录和学生出勤
+     ========================= */
 
-    const { teacher, classRelations, teachingGoals, lessonRecords } =
-      detailData;
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-    const teacherStatus = teacher.status || "active";
+    if (!pageData) {
+      setMessage("页面数据尚未加载完成，暂时不能保存记录。");
+      return;
+    }
 
-    const classSummaries: ClassSummary[] = classRelations.map((relation) => {
-      const classItem = getOne(relation.classes);
-      const cohort = getOne(classItem?.cohorts);
-      const classStudents = getMany(classItem?.class_students);
+    const { selectedClassId, students } = pageData;
 
-      return {
-        id: relation.class_id,
-        name: classItem?.name || "未知班级",
-        school: classItem?.school || null,
-        subject: classItem?.subject || null,
-        status: classItem?.status || null,
-        cohortName: cohort?.name || "未设置届别",
-        studentCount: classStudents.length,
-      };
-    });
+    setIsSubmitting(true);
+    setMessage("");
 
-    const studentIds = new Set<string>();
+    const formData = new FormData(event.currentTarget);
 
-    classRelations.forEach((relation) => {
-      const classItem = getOne(relation.classes);
-      const classStudents = getMany(classItem?.class_students);
+    const lessonDate = String(formData.get("lesson_date") || "");
+    const durationMinutes = Number(formData.get("duration_minutes"));
+    const goalId = String(formData.get("goal_id") || "");
+    const lessonTitle = String(formData.get("lesson_title") || "").trim();
+    const lessonContentAndFeedback = String(
+      formData.get("lesson_content_and_feedback") || ""
+    ).trim();
+    const homework = String(formData.get("homework") || "").trim();
+    const nextPlan = String(formData.get("next_plan") || "").trim();
+    const materialLink = String(formData.get("material_link") || "").trim();
+    const teacherReflection = String(
+      formData.get("teacher_reflection") || ""
+    ).trim();
 
-      classStudents.forEach((classStudent) => {
-        if (classStudent.student_id) {
-          studentIds.add(classStudent.student_id);
-        }
-      });
-    });
+    if (
+      !lessonDate ||
+      !durationMinutes ||
+      !lessonTitle ||
+      !lessonContentAndFeedback
+    ) {
+      setMessage("请填写上课日期、授课时长、本节课主题和课程内容。");
+      setIsSubmitting(false);
+      return;
+    }
 
-    const totalMinutes = lessonRecords.reduce(
-      (sum, lesson) => sum + (lesson.duration_minutes || 0),
-      0
-    );
+    if (durationMinutes <= 0) {
+      setMessage("授课时长必须大于 0。");
+      setIsSubmitting(false);
+      return;
+    }
 
-    const recentThirtyDaysLessonCount = lessonRecords.filter((lesson) =>
-      isWithinRecentThirtyDays(lesson.lesson_date)
-    ).length;
+    /**
+     * 第一步：保存课程记录。
+     * 这里写入 teacher_id 和 class_id，保证记录归属清楚。
+     */
+    const { data: insertedLesson, error: lessonError } = await supabase
+      .from("lesson_records")
+      .insert({
+        teacher_id: currentTeacher.id,
+        class_id: selectedClassId,
+        goal_id: goalId || null,
+        lesson_date: lessonDate,
+        duration_minutes: durationMinutes,
+        lesson_title: lessonTitle,
+        lesson_content_and_feedback: lessonContentAndFeedback,
+        homework: homework || null,
+        next_plan: nextPlan || null,
+        material_link: materialLink || null,
+        teacher_reflection: teacherReflection || null,
+      })
+      .select("id")
+      .single();
 
-    const recentFourWeeksCount = getRecentFourWeeksCount(lessonRecords);
+    if (lessonError) {
+      setMessage(`保存课程记录失败：${lessonError.message}`);
+      setIsSubmitting(false);
+      return;
+    }
 
-    const activeGoalCount = teachingGoals.filter(
-      (goal) => goal.status === "active" || !goal.status
-    ).length;
+    /**
+     * 第二步：保存学生出勤。
+     * 出勤记录依附于刚刚创建的 lesson_record_id。
+     */
+    const attendanceRows = students.map((student) => ({
+      lesson_record_id: insertedLesson.id,
+      student_id: student.id,
+      is_present: attendanceMap[student.id] ?? false,
+    }));
 
-    const subjectConflict = hasSubjectConflict(
-      teacher.subject,
-      classSummaries
-    );
+    if (attendanceRows.length > 0) {
+      const { error: attendanceError } = await supabase
+        .from("lesson_attendance")
+        .insert(attendanceRows);
 
-    const attention = getAttentionLabel({
-      status: teacherStatus,
-      subject: teacher.subject,
-      classCount: classRelations.length,
-      lessonCount: lessonRecords.length,
-      recentThirtyDaysLessonCount,
-      recentFourWeeksCount,
-      hasSubjectConflict: subjectConflict,
-    });
+      if (attendanceError) {
+        setMessage(`课程记录已提交，但学生出勤保存失败：${attendanceError.message}`);
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
-    const goalById = new Map<string, TeachingGoal>();
+    /**
+     * 保存成功后直接回到 teacher 主页。
+     * 不再 router.refresh()，teacher 主页会自己读取最新数据。
+     */
+    setMessage("课程记录和学生出勤已提交。");
+    setIsSubmitting(false);
 
-    teachingGoals.forEach((goal) => {
-      goalById.set(goal.id, goal);
-    });
+    router.push("/teacher");
+  }
 
-    const classNameById = new Map<string, string>();
+  /* =========================
+     8. 派生数据：给 JSX 使用
+     ========================= */
 
-    classSummaries.forEach((classSummary) => {
-      classNameById.set(classSummary.id, classSummary.name);
-    });
+  const classes = pageData?.classes || [];
+  const selectedClassId = pageData?.selectedClassId || "";
+  const goals = pageData?.goals || [];
+  const students = pageData?.students || [];
 
-    return {
-      teacherStatus,
-      classSummaries,
-      studentCount: studentIds.size,
-      totalMinutes,
-      recentThirtyDaysLessonCount,
-      recentFourWeeksCount,
-      activeGoalCount,
-      subjectConflict,
-      attention,
-      goalById,
-      classNameById,
-      shouldShowMaintenanceNotice: isMaintenanceTeacher({
-        status: teacherStatus,
-        classCount: classRelations.length,
-        subject: teacher.subject,
-        hasSubjectConflict: subjectConflict,
-      }),
-      visibleGoals: showAllGoals
-        ? teachingGoals
-        : teachingGoals.slice(0, 3),
-      visibleLessons: showAllLessons
-        ? lessonRecords
-        : lessonRecords.slice(0, 5),
-    };
-  }, [detailData, showAllGoals, showAllLessons]);
+  const selectedClass = useMemo(() => {
+    return classes.find((classItem) => classItem.id === selectedClassId) || null;
+  }, [classes, selectedClassId]);
+
+  const hasMultipleClasses = classes.length > 1;
+
+  /* =========================
+     9. 加载状态
+     ========================= */
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
-        <section className="mx-auto max-w-5xl rounded-[1.75rem] border border-emerald-100 bg-white p-6 shadow-sm">
-          <p className="text-sm text-stone-600">
-            正在读取小老师详情...
-          </p>
+      <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+        <section className="mx-auto max-w-4xl rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm">
+          <p className="text-sm text-stone-600">正在读取小老师信息...</p>
         </section>
       </main>
     );
   }
 
-  if (message || !detailData || !computed) {
-    return (
-      <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
-        <section className="mx-auto max-w-5xl rounded-[1.75rem] border border-red-100 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-bold text-red-700">读取失败</h1>
-
-          <p className="mt-3 text-sm text-stone-600">
-            {message || "小老师详情不存在。"}
-          </p>
-
-          <Link
-            href="/admin/teachers"
-            className="mt-5 inline-block rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-          >
-            返回小老师查询
-          </Link>
-        </section>
-      </main>
-    );
-  }
-
-  const { teacher, teachingGoals, lessonRecords } = detailData;
-
-  const {
-    teacherStatus,
-    classSummaries,
-    studentCount,
-    totalMinutes,
-    recentThirtyDaysLessonCount,
-    recentFourWeeksCount,
-    activeGoalCount,
-    attention,
-    goalById,
-    classNameById,
-    shouldShowMaintenanceNotice,
-    visibleGoals,
-    visibleLessons,
-  } = computed;
+  /* =========================
+     10. 页面渲染
+     ========================= */
 
   return (
-    <main className="min-h-screen bg-[#f6f5e9] px-5 py-8 text-stone-800">
-      <section className="mx-auto max-w-7xl">
-        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <p className="text-sm font-semibold text-[#2f5d50]">
-              Admin / 小老师详情
-            </p>
+    <main className="min-h-screen bg-[#f6f5e9] px-6 py-10 text-stone-800">
+      <div className="mx-auto max-w-4xl">
+        <div className="mb-8">
+          <Link
+            href="/teacher"
+            className="text-sm font-semibold text-emerald-800 hover:text-emerald-950"
+          >
+            ← 返回小老师主页
+          </Link>
 
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-bold text-emerald-950">
-                {teacher.name}
-              </h1>
+          <h1 className="mt-3 text-4xl font-bold text-emerald-950">
+            添加授课记录
+          </h1>
 
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
-                  teacher.subject
-                )}`}
-              >
-                {getSubjectLabel(teacher.subject)}
-              </span>
+          <p className="mt-4 leading-8 text-stone-600">
+            当前小老师：
+            <span className="font-semibold text-emerald-800">
+              {currentTeacher.name}
+            </span>
+            。请记录本节课的基本信息、出勤情况、课程内容和后续计划。
+          </p>
 
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${getTeacherStatusClassName(
-                  teacherStatus
-                )}`}
-              >
-                {getTeacherStatusLabel(teacherStatus)}
-              </span>
-
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${attention.className}`}
-              >
-                {attention.text}
-              </span>
+          {message && (
+            <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-800">
+              {message}
             </div>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              本页用于查看单个小老师的教学档案，包括教学学科、负责班级、覆盖学生、学习目标和课程记录。维护操作统一去维护中心处理。
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/admin/maintenance"
-              className="w-fit rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900"
-            >
-              进入维护中心
-            </Link>
-
-            <Link
-              href="/admin/teachers"
-              className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-            >
-              返回小老师查询
-            </Link>
-
-            <Link
-              href="/admin"
-              className="w-fit rounded-full border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
-            >
-              返回管理员首页
-            </Link>
-          </div>
+          )}
         </div>
 
-        {shouldShowMaintenanceNotice && (
-          <section className="mb-6 rounded-[1.75rem] border border-red-100 bg-red-50 p-5 text-sm leading-7 text-red-700">
-            <p className="font-bold">这个小老师需要维护</p>
-            <p className="mt-1">{attention.description}</p>
-          </section>
-        )}
-
-        <section className="grid gap-4 md:grid-cols-4">
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">负责班级</p>
-
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {classSummaries.length}
-            </p>
-
-            <p className="mt-1 text-xs text-stone-500">个班级</p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">覆盖学生</p>
-
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {studentCount}
-            </p>
-
-            <p className="mt-1 text-xs text-stone-500">名学生</p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">课程记录</p>
-
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {lessonRecords.length}
-            </p>
-
-            <p className="mt-1 text-xs text-stone-500">
-              累计 {formatHours(totalMinutes)} 小时
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-            <p className="text-sm text-stone-500">近 30 天课程</p>
-
-            <p className="mt-2 text-3xl font-bold text-emerald-950">
-              {recentThirtyDaysLessonCount}
-            </p>
-
-            <p className="mt-1 text-xs text-stone-500">
-              近 4 周活跃 {recentFourWeeksCount}/4 周
-            </p>
-          </div>
-        </section>
-
-        <section className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-            <h2 className="text-xl font-bold text-emerald-950">
-              基本信息
-            </h2>
-
-            <div className="mt-5 space-y-4 text-sm">
-              <div>
-                <p className="text-stone-500">小老师姓名</p>
-                <p className="mt-1 font-semibold text-emerald-950">
-                  {teacher.name}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-stone-500">教学学科</p>
-
-                <span
-                  className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getSubjectClassName(
-                    teacher.subject
-                  )}`}
-                >
-                  {getSubjectLabel(teacher.subject)}
-                </span>
-              </div>
-
-              <div>
-                <p className="text-stone-500">邮箱</p>
-                <p className="mt-1 font-semibold text-emerald-950">
-                  {teacher.email || "暂未填写"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-stone-500">创建时间</p>
-                <p className="mt-1 font-semibold text-emerald-950">
-                  {teacher.created_at?.slice(0, 10) || "暂无"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-stone-500">进行中学习目标</p>
-                <p className="mt-1 font-semibold text-emerald-950">
-                  {activeGoalCount} 个
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-            <h2 className="text-xl font-bold text-emerald-950">
-              负责班级
-            </h2>
-
-            {classSummaries.length === 0 ? (
-              <p className="mt-5 rounded-2xl bg-red-50 p-5 text-sm leading-7 text-red-700">
-                这个小老师暂时没有绑定任何班级。正常情况下，小老师应该通过分班导入或维护中心加入班级。
-              </p>
-            ) : (
-              <div className="mt-5 space-y-3">
-                {classSummaries.map((classSummary) => {
-                  const subjectConflict =
-                    teacher.subject &&
-                    classSummary.subject &&
-                    teacher.subject !== classSummary.subject;
-
-                  return (
-                    <div
-                      key={classSummary.id}
-                      className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4"
-                    >
-                      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="font-bold text-emerald-950">
-                              {classSummary.name}
-                            </h3>
-
-                            <span
-                              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${getSubjectClassName(
-                                classSummary.subject
-                              )}`}
-                            >
-                              {getSubjectLabel(classSummary.subject)}
-                            </span>
-                          </div>
-
-                          <p className="mt-1 text-sm text-stone-600">
-                            {classSummary.cohortName} ·{" "}
-                            {classSummary.school || "未填写学校"}
-                          </p>
-
-                          <p className="mt-2 text-xs text-stone-500">
-                            学生人数：{classSummary.studentCount}
-                          </p>
-                        </div>
-
-                        <span
-                          className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${getClassStatusClassName(
-                            classSummary.status
-                          )}`}
-                        >
-                          {getClassStatusLabel(classSummary.status)}
-                        </span>
-                      </div>
-
-                      {subjectConflict && (
-                        <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                          学科不一致：小老师为
-                          {getSubjectLabel(teacher.subject)}
-                          ，班级为
-                          {getSubjectLabel(classSummary.subject)}
-                        </p>
-                      )}
-
-                      <Link
-                        href={`/admin/classes/${classSummary.id}`}
-                        className="mt-4 inline-block rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                      >
-                        查看班级详情
-                      </Link>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-            <div>
-              <h2 className="text-xl font-bold text-emerald-950">
-                学习目标
+        <section className="rounded-[2rem] border border-emerald-100 bg-white p-7 shadow-sm md:p-9">
+          <form onSubmit={handleSubmit} className="space-y-7">
+            {/* 基本信息 */}
+            <section>
+              <h2 className="text-2xl font-bold text-emerald-950">
+                基本信息
               </h2>
 
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                这里显示该小老师负责班级下的学习目标。默认显示最近 3
-                个，点击按钮可展开全部。
-              </p>
-            </div>
+              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-semibold text-stone-700">
+                    所属班级
+                  </label>
 
-            {teachingGoals.length > 3 && (
-              <button
-                type="button"
-                onClick={() => setShowAllGoals((previous) => !previous)}
-                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-              >
-                {showAllGoals
-                  ? "收起学习目标"
-                  : `展开全部 ${teachingGoals.length} 个目标`}
-              </button>
-            )}
-          </div>
+                  <input
+                    type="text"
+                    value={selectedClass?.name || "未读取到班级"}
+                    readOnly
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-stone-100 px-4 py-3 text-stone-600 outline-none"
+                  />
 
-          {teachingGoals.length === 0 ? (
-            <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-              暂时没有学习目标。
-            </p>
-          ) : (
-            <div className="mt-5 space-y-3">
-              {visibleGoals.map((goal) => {
-                const className = goal.class_id
-                  ? classNameById.get(goal.class_id) || "未知班级"
-                  : "未知班级";
+                  <p className="mt-2 text-xs leading-5 text-stone-500">
+                    班级根据当前登录的小老师账号自动读取。当前版本默认使用第一个未归档班级。
+                  </p>
 
-                const relatedLessonCount = lessonRecords.filter(
-                  (lesson) => lesson.goal_id === goal.id
-                ).length;
-
-                return (
-                  <div
-                    key={goal.id}
-                    className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4"
-                  >
-                    <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                      <div>
-                        <h3 className="font-bold text-emerald-950">
-                          {goal.title}
-                        </h3>
-
-                        <p className="mt-1 text-xs text-stone-500">
-                          {className} · 创建于{" "}
-                          {goal.created_at?.slice(0, 10) || "暂无日期"}
-                        </p>
-                      </div>
-
-                      <span
-                        className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${getGoalStatusClassName(
-                          goal.status
-                        )}`}
-                      >
-                        {getGoalStatusLabel(goal.status)}
-                      </span>
-                    </div>
-
-                    {goal.description && (
-                      <p className="mt-3 whitespace-pre-line text-sm leading-7 text-stone-600">
-                        {goal.description}
-                      </p>
-                    )}
-
-                    <div className="mt-4 flex flex-wrap gap-2 text-xs text-stone-500">
-                      <span className="rounded-full bg-white px-3 py-1">
-                        已关联课程 {relatedLessonCount} 节
-                      </span>
-
-                      <span className="rounded-full bg-white px-3 py-1">
-                        预计课程{" "}
-                        {goal.expected_lessons
-                          ? `${goal.expected_lessons} 节`
-                          : "未设置"}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        <section className="mt-6 rounded-[1.75rem] border border-emerald-100 bg-white p-5 shadow-sm md:p-6">
-          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-            <div>
-              <h2 className="text-xl font-bold text-emerald-950">
-                课程记录
-              </h2>
-
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                这里显示该小老师填写过的课程记录。默认显示最近 5
-                条，点击按钮可展开全部。
-              </p>
-            </div>
-
-            {lessonRecords.length > 5 && (
-              <button
-                type="button"
-                onClick={() => setShowAllLessons((previous) => !previous)}
-                className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-              >
-                {showAllLessons
-                  ? "收起课程记录"
-                  : `展开全部 ${lessonRecords.length} 条记录`}
-              </button>
-            )}
-          </div>
-
-          {lessonRecords.length === 0 ? (
-            <p className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-              暂时没有课程记录。
-            </p>
-          ) : (
-            <div className="mt-5 space-y-3">
-              {visibleLessons.map((lesson) => {
-                const className = lesson.class_id
-                  ? classNameById.get(lesson.class_id) || "未知班级"
-                  : "未知班级";
-
-                const goal = lesson.goal_id
-                  ? goalById.get(lesson.goal_id) || null
-                  : null;
-
-                return (
-                  <div
-                    key={lesson.id}
-                    className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-4"
-                  >
-                    <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                      <div>
-                        <h3 className="font-bold text-emerald-950">
-                          {lesson.lesson_title}
-                        </h3>
-
-                        <p className="mt-1 text-xs text-stone-500">
-                          {lesson.lesson_date} · {className} ·{" "}
-                          {lesson.duration_minutes} 分钟
-                        </p>
-
-                        <p className="mt-1 text-xs text-stone-500">
-                          所属目标：{goal?.title || "未关联学习目标"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <p className="mt-3 whitespace-pre-line text-sm leading-7 text-stone-600">
-                      {lesson.lesson_content_and_feedback}
+                  {hasMultipleClasses && (
+                    <p className="mt-2 text-xs leading-5 text-amber-700">
+                      系统检测到你关联了多个班级。当前页面会默认使用第一个班级；后续可以升级为班级下拉选择。
                     </p>
+                  )}
+                </div>
 
-                    {(lesson.homework ||
-                      lesson.next_plan ||
-                      lesson.material_link ||
-                      lesson.teacher_reflection) && (
-                      <div className="mt-4 grid gap-3 md:grid-cols-2">
-                        {lesson.homework && (
-                          <div className="rounded-2xl bg-white p-3">
-                            <p className="text-xs font-semibold text-emerald-950">
-                              作业 / 练习
-                            </p>
+                <div>
+                  <label className="text-sm font-semibold text-stone-700">
+                    所属课程目标
+                  </label>
 
-                            <p className="mt-1 whitespace-pre-line text-xs leading-5 text-stone-600">
-                              {lesson.homework}
-                            </p>
-                          </div>
-                        )}
+                  <select
+                    name="goal_id"
+                    disabled={!selectedClassId}
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="">不关联教学目标</option>
 
-                        {lesson.next_plan && (
-                          <div className="rounded-2xl bg-white p-3">
-                            <p className="text-xs font-semibold text-emerald-950">
-                              下次计划
-                            </p>
+                    {goals.map((goal) => (
+                      <option key={goal.id} value={goal.id}>
+                        {goal.title}
+                        {goal.expected_lessons
+                          ? `（计划 ${goal.expected_lessons} 节）`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                            <p className="mt-1 whitespace-pre-line text-xs leading-5 text-stone-600">
-                              {lesson.next_plan}
-                            </p>
-                          </div>
-                        )}
+                <div>
+                  <label className="text-sm font-semibold text-stone-700">
+                    上课日期
+                  </label>
 
-                        {lesson.teacher_reflection && (
-                          <div className="rounded-2xl bg-white p-3">
-                            <p className="text-xs font-semibold text-emerald-950">
-                              老师反思
-                            </p>
+                  <input
+                    type="date"
+                    name="lesson_date"
+                    defaultValue={today}
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                  />
 
-                            <p className="mt-1 whitespace-pre-line text-xs leading-5 text-stone-600">
-                              {lesson.teacher_reflection}
-                            </p>
-                          </div>
-                        )}
+                  <p className="mt-2 text-xs leading-5 text-stone-500">
+                    默认是今天，也可以手动修改为实际上课日期。
+                  </p>
+                </div>
 
-                        {lesson.material_link && (
-                          <div className="rounded-2xl bg-white p-3">
-                            <p className="text-xs font-semibold text-emerald-950">
-                              课程材料
-                            </p>
+                <div>
+                  <label className="text-sm font-semibold text-stone-700">
+                    授课时长（分钟）
+                  </label>
 
-                            <a
-                              href={lesson.material_link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-1 inline-block text-xs font-semibold text-emerald-700 underline"
-                            >
-                              打开材料链接
-                            </a>
-                          </div>
-                        )}
+                  <input
+                    type="number"
+                    name="duration_minutes"
+                    defaultValue={40}
+                    min="1"
+                    placeholder="例如：40"
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="text-sm font-semibold text-stone-700">
+                    本节课主题
+                  </label>
+
+                  <input
+                    type="text"
+                    name="lesson_title"
+                    placeholder="例如：小王子第一章 / 自我介绍与阅读导入"
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+            </section>
+
+            {/* 学生出勤 */}
+            <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-bold text-emerald-950">学生出勤</h2>
+
+              <p className="mt-2 text-sm leading-7 text-stone-600">
+                默认全部出勤。如果有学生没有参加本节课，请取消勾选。
+              </p>
+
+              {students.length === 0 ? (
+                <p className="mt-4 rounded-2xl bg-[#fffdf4] p-4 text-sm text-stone-600">
+                  当前班级还没有录入学生，暂时无法记录出勤。
+                </p>
+              ) : (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {students.map((student) => (
+                    <label
+                      key={student.id}
+                      className="flex cursor-pointer items-center justify-between rounded-2xl bg-[#fffdf4] p-4 text-sm"
+                    >
+                      <div>
+                        <p className="font-semibold text-emerald-950">
+                          {student.name}
+                        </p>
+
+                        <p className="mt-1 text-xs text-stone-500">
+                          {student.note || "暂无备注"}
+                        </p>
                       </div>
-                    )}
+
+                      <input
+                        type="checkbox"
+                        checked={attendanceMap[student.id] ?? false}
+                        onChange={(event) => {
+                          setAttendanceMap((previousMap) => ({
+                            ...previousMap,
+                            [student.id]: event.target.checked,
+                          }));
+                        }}
+                        className="h-4 w-4"
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* 课程内容与课后安排 */}
+            <section className="border-t border-emerald-100 pt-7">
+              <h2 className="text-2xl font-bold text-emerald-950">
+                课程内容与课后安排
+              </h2>
+
+              <div className="mt-5 space-y-5">
+                <div>
+                  <label className="text-sm font-semibold text-stone-700">
+                    本节课内容与课堂反馈
+                  </label>
+
+                  <textarea
+                    name="lesson_content_and_feedback"
+                    rows={6}
+                    placeholder="记录本节课讲了什么、学生整体理解情况、互动情况、哪里做得好、哪里需要继续练习。"
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="grid gap-5 md:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      课后作业（选填）
+                    </label>
+
+                    <textarea
+                      name="homework"
+                      rows={3}
+                      placeholder="例如：复习关键词，完成一段复述。"
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                    />
                   </div>
-                );
-              })}
+
+                  <div>
+                    <label className="text-sm font-semibold text-stone-700">
+                      下节课计划（选填）
+                    </label>
+
+                    <textarea
+                      name="next_plan"
+                      rows={3}
+                      placeholder="例如：继续阅读下一章，加入开放式问题。"
+                      className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-stone-700">
+                    视频 / 材料链接（选填）
+                  </label>
+
+                  <input
+                    type="url"
+                    name="material_link"
+                    placeholder="https://..."
+                    className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+            </section>
+
+            {/* 小老师反思 */}
+            <section className="border-t border-emerald-100 pt-7">
+              <div className="rounded-2xl border border-emerald-100 bg-[#edf3df] p-5">
+                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                  <div>
+                    <h2 className="text-2xl font-bold text-emerald-950">
+                      小老师反思（私密）
+                    </h2>
+
+                    <p className="mt-2 leading-7 text-stone-600">
+                      这部分只对小老师本人和管理员可见，不会显示给学生。
+                    </p>
+                  </div>
+
+                  <span className="w-fit rounded-full bg-white px-4 py-2 text-sm font-semibold text-emerald-800">
+                    私密
+                  </span>
+                </div>
+
+                <textarea
+                  name="teacher_reflection"
+                  rows={4}
+                  placeholder="例如：这节课哪里顺利？哪里需要调整？下次如何改进？有没有需要管理员或课程部帮助的地方？"
+                  className="mt-5 w-full rounded-xl border border-emerald-100 bg-white px-4 py-3 leading-7 outline-none focus:border-emerald-500"
+                />
+              </div>
+            </section>
+
+            {/* 提交区 */}
+            <div className="flex flex-col gap-3 border-t border-emerald-100 pt-6 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm leading-6 text-stone-500">
+                当前版本会根据登录的小老师账号，自动保存真实 teacher_id、class_id 和学生出勤。
+              </p>
+
+              <button
+                type="submit"
+                disabled={isSubmitting || !selectedClassId}
+                className="rounded-full bg-[#cfe8d6] px-7 py-3 font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSubmitting ? "保存中..." : "保存记录"}
+              </button>
             </div>
-          )}
+          </form>
         </section>
-      </section>
+      </div>
     </main>
   );
 }
