@@ -971,19 +971,6 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
     return lines.join("\n");
   }
 
-  async function handleCopyAccounts() {
-    if (createdAccounts.length === 0) {
-      window.alert("本次没有新创建账号，因此没有可复制的初始密码。");
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(buildAccountText());
-      window.alert("账号清单已复制。请粘贴到安全的位置保存。");
-    } catch {
-      window.alert("复制失败。请手动选中表格内容复制。");
-    }
-  }
 
   function handleDownloadAccounts() {
     if (createdAccounts.length === 0) {
@@ -1053,13 +1040,6 @@ function ImportResultPanel({ result }: ImportResultPanelProps) {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleCopyAccounts}
-                className="rounded-full bg-amber-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-950"
-              >
-                复制账号清单
-              </button>
 
               <button
                 type="button"
