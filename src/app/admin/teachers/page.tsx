@@ -13,7 +13,7 @@ import AdminGuard from "@/components/AdminGuard";
  *    统一放到 /admin/maintenance。
  * 4. 本页面不再展示账号绑定判断，不再处理删除申请或高风险操作。
  * 5. 管理员在这里主要观察小老师学科、负责班级、学生数量、
- *    课程次数、近 30 天上课次数、近 4 周活跃情况。
+ *    课程次数、近 30 天上课次数、当前月份授课时长。
  * 6. “待维护”包含：状态异常、缺少学科，或者 active 但未分配班级。
  *
  * 展示原则：
@@ -47,7 +47,7 @@ type TeacherTableItem = {
   lessonCount: number;
   recentThirtyDaysLessonCount: number;
   totalMinutes: number;
-  recentFourWeeksCount: number;
+  currentMonthMinutes: number;
 };
 
 type RelatedCohort = {
@@ -131,19 +131,15 @@ function getTeacherStatusClassName(status: string) {
   if (status === "active") {
     return "bg-emerald-50 text-emerald-700";
   }
-
   if (status === "archived") {
     return "bg-stone-100 text-stone-500";
   }
-
   if (status === "withdrawn") {
     return "bg-amber-50 text-amber-700";
   }
-
   if (status === "delete_requested") {
     return "bg-red-50 text-red-700";
   }
-
   return "bg-stone-100 text-stone-500";
 }
 
@@ -208,10 +204,11 @@ function getAttentionLabel(teacher: TeacherTableItem) {
     };
   }
 
-  if (teacher.recentFourWeeksCount < 2) {
+  if (teacher.currentMonthMinutes < 80) {
     return {
-      text: "频率偏低",
-      className: "bg-amber-50 text-amber-700",
+      text: "本月授课较少",
+      className:
+        "bg-amber-50 text-amber-700",
     };
   }
 
@@ -221,38 +218,30 @@ function getAttentionLabel(teacher: TeacherTableItem) {
   };
 }
 
-function getMondayKey(dateString: string) {
-  const date = new Date(dateString);
-  const monday = new Date(date);
-
-  const day = monday.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-
-  monday.setDate(date.getDate() + diffToMonday);
-  monday.setHours(0, 0, 0, 0);
-
-  return monday.toISOString().slice(0, 10);
-}
-
-function getRecentFourWeeksCount(lessons: LessonRecordRow[]) {
+function getCurrentMonthMinutes(
+  lessons: LessonRecordRow[]
+) {
   const today = new Date();
-  const fourWeeksAgo = new Date();
 
-  fourWeeksAgo.setDate(today.getDate() - 28);
-  fourWeeksAgo.setHours(0, 0, 0, 0);
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
 
-  const recentLessons = lessons.filter((lesson) => {
-    const lessonDate = new Date(lesson.lesson_date);
-    return lessonDate >= fourWeeksAgo && lessonDate <= today;
-  });
+  return lessons
+    .filter((lesson) => {
+      const lessonDate = new Date(
+        lesson.lesson_date
+      );
 
-  const weekKeys = new Set<string>();
-
-  recentLessons.forEach((lesson) => {
-    weekKeys.add(getMondayKey(lesson.lesson_date));
-  });
-
-  return weekKeys.size;
+      return (
+        lessonDate.getFullYear() === currentYear &&
+        lessonDate.getMonth() === currentMonth
+      );
+    })
+    .reduce(
+      (sum, lesson) =>
+        sum + (lesson.duration_minutes || 0),
+      0
+    );
 }
 
 function isWithinRecentThirtyDays(dateString: string) {
@@ -266,7 +255,10 @@ function isWithinRecentThirtyDays(dateString: string) {
   return lessonDate >= thirtyDaysAgo && lessonDate <= today;
 }
 
-function formatHours(minutes: number) {
+function formatHours(minutes: number | null | undefined) {
+  if (!minutes || Number.isNaN(minutes)) {
+    return 0;
+  }
   return Math.round((minutes / 60) * 10) / 10;
 }
 
@@ -441,7 +433,6 @@ async function fetchTeachersPageData(): Promise<TeachersPageData> {
           sum + (lesson.duration_minutes || 0),
         0
       );
-
       return {
         id: teacher.id,
         name: teacher.name,
@@ -456,19 +447,25 @@ async function fetchTeachersPageData(): Promise<TeachersPageData> {
 
         studentCount: studentIds.size,
         lessonCount: teacherLessons.length,
+
         recentThirtyDaysLessonCount,
+
         totalMinutes,
-        recentFourWeeksCount:
-          getRecentFourWeeksCount(teacherLessons),
+
+        currentMonthMinutes:
+          getCurrentMonthMinutes(
+            teacherLessons
+          ),
       };
     }
   );
 
-  return {
-    teachers: formattedTeachers,
-    cohorts,
-  };
-}
+      return {
+        teachers: formattedTeachers,
+        cohorts,
+      };
+    }
+
 
 export default function AdminTeachersPage() {
   return (
@@ -803,7 +800,7 @@ function AdminTeachersContent() {
                     </th>
 
                     <th className="px-4 py-3 font-semibold">
-                      近 4 周
+                      本月授课时长
                     </th>
 
                     <th className="px-4 py-3 font-semibold">
@@ -902,12 +899,13 @@ function AdminTeachersContent() {
                         </td>
 
                         <td className="px-4 py-4">
-                          <p className="font-semibold text-emerald-950">
-                            {teacher.recentFourWeeksCount}/4 周
+                          <p className="text-2xl font-bold text-emerald-950">
+                            {formatHours(
+                              teacher.currentMonthMinutes
+                            )}
                           </p>
-
                           <p className="mt-1 text-xs text-stone-500">
-                            活跃周数
+                            小时
                           </p>
                         </td>
 

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import TeacherGuard, { useCurrentTeacher } from "@/components/TeacherGuard";
-import type { CurrentTeacher } from "@/lib/auth";
 
 /**
  * teacher/new-record 页面原则：
@@ -56,6 +55,8 @@ type NewRecordPageData = {
   students: ClassStudentItem[];
 };
 
+const EMPTY_CLASSES: ClassItem[] = [];
+
 /* =========================
    2. 工具函数：生成今天日期，作为默认上课日期
    ========================= */
@@ -90,6 +91,7 @@ function NewRecordContent() {
    * 这里不会再次访问数据库确认老师身份。
    */
   const currentTeacher = useCurrentTeacher();
+  const teacherId = currentTeacher.id;
 
   const [pageData, setPageData] = useState<NewRecordPageData | null>(null);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>(
@@ -105,7 +107,7 @@ function NewRecordContent() {
      ========================= */
 
   async function loadNewRecordPageData(
-    activeTeacher: CurrentTeacher
+    teacherId: string
   ): Promise<NewRecordPageData> {
     /**
      * 第一步：读取当前小老师负责的班级。
@@ -125,7 +127,7 @@ function NewRecordContent() {
         )
       `
       )
-      .eq("teacher_id", activeTeacher.id);
+      .eq("teacher_id", teacherId);
 
     if (classTeacherError) {
       throw new Error(`读取小老师班级失败：${classTeacherError.message}`);
@@ -176,7 +178,7 @@ function NewRecordContent() {
       supabase
         .from("teaching_goals")
         .select("id, class_id, title, expected_lessons")
-        .eq("teacher_id", activeTeacher.id)
+        .eq("teacher_id", teacherId)
         .eq("class_id", selectedClass.id)
         .eq("status", "active")
         .order("created_at", { ascending: false }),
@@ -209,18 +211,17 @@ function NewRecordContent() {
   }
 
   /* =========================
-     6. 页面加载：currentTeacher 准备好后读取业务数据
+     6. 页面加载：teacherId 准备好后读取业务数据
      ========================= */
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadPage() {
-      setIsLoading(true);
       setMessage("");
 
       try {
-        const loadedPageData = await loadNewRecordPageData(currentTeacher);
+        const loadedPageData = await loadNewRecordPageData(teacherId);
 
         if (!isMounted) return;
 
@@ -258,7 +259,7 @@ function NewRecordContent() {
     return () => {
       isMounted = false;
     };
-  }, [currentTeacher]);
+  }, [teacherId]);
 
   /* =========================
      7. 提交函数：保存课程记录和学生出勤
@@ -374,7 +375,7 @@ function NewRecordContent() {
      8. 派生数据：给 JSX 使用
      ========================= */
 
-  const classes = pageData?.classes || [];
+  const classes = pageData?.classes ?? EMPTY_CLASSES;
   const selectedClassId = pageData?.selectedClassId || "";
   const goals = pageData?.goals || [];
   const students = pageData?.students || [];
@@ -423,7 +424,6 @@ function NewRecordContent() {
             <span className="font-semibold text-emerald-800">
               {currentTeacher.name}
             </span>
-            。请记录本节课的基本信息、出勤情况、课程内容和后续计划。
           </p>
 
           {message && (
@@ -454,13 +454,9 @@ function NewRecordContent() {
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-stone-100 px-4 py-3 text-stone-600 outline-none"
                   />
 
-                  <p className="mt-2 text-xs leading-5 text-stone-500">
-                    班级根据当前登录的小老师账号自动读取。当前版本默认使用第一个未归档班级。
-                  </p>
-
                   {hasMultipleClasses && (
                     <p className="mt-2 text-xs leading-5 text-amber-700">
-                      系统检测到你关联了多个班级。当前页面会默认使用第一个班级；后续可以升级为班级下拉选择。
+                      系统检测到你关联了多个班级，请联系管理员
                     </p>
                   )}
                 </div>
@@ -500,9 +496,6 @@ function NewRecordContent() {
                     className="mt-2 w-full rounded-xl border border-emerald-100 bg-[#f6f5e9] px-4 py-3 outline-none focus:border-emerald-500"
                   />
 
-                  <p className="mt-2 text-xs leading-5 text-stone-500">
-                    默认是今天，也可以手动修改为实际上课日期。
-                  </p>
                 </div>
 
                 <div>
@@ -539,10 +532,6 @@ function NewRecordContent() {
             <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-bold text-emerald-950">学生出勤</h2>
 
-              <p className="mt-2 text-sm leading-7 text-stone-600">
-                默认全部出勤。如果有学生没有参加本节课，请取消勾选。
-              </p>
-
               {students.length === 0 ? (
                 <p className="mt-4 rounded-2xl bg-[#fffdf4] p-4 text-sm text-stone-600">
                   当前班级还没有录入学生，暂时无法记录出勤。
@@ -557,10 +546,6 @@ function NewRecordContent() {
                       <div>
                         <p className="font-semibold text-emerald-950">
                           {student.name}
-                        </p>
-
-                        <p className="mt-1 text-xs text-stone-500">
-                          {student.note || "暂无备注"}
                         </p>
                       </div>
 

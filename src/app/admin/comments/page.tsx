@@ -401,13 +401,6 @@ function AdminMessagesContent() {
                           </p>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => setSelectedMessage(item)}
-                          className="w-fit rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                        >
-                          放入发布准备区
-                        </button>
                       </div>
 
                       <p className="mt-4 whitespace-pre-line text-sm leading-7 text-stone-700">

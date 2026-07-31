@@ -394,6 +394,17 @@ useEffect(() => {
     });
   }, [data, selectedClassId, classTeachers, classStudents]);
 
+  const pendingCohortRequests = useMemo(() => {
+    if (!data) return [];
+
+    return data.requests.filter((request) => {
+      return (
+        request.action_type === "archive_cohort" &&
+        request.target_type === "cohort"
+      );
+    });
+  }, [data]);
+
   function handleSelectClass(classItem: MaintenanceClassItem) {
     setSelectedClassId(classItem.id);
     setEditClassName(classItem.name);
@@ -612,6 +623,48 @@ useEffect(() => {
       targetId: student.id,
       targetName: student.name,
       note: `申请重置学生「${student.name}」的登录密码。旧密码会在申请完成后失效。`,
+    });
+  }
+
+  function handleCreateArchiveCohortRequest() {
+    if (!selectedCohortId || !data) {
+      setMessage("请先选择需要封存的届别。");
+      return;
+    }
+
+    const cohort = data.cohorts.find(
+      (item) => item.id === selectedCohortId
+    );
+
+    if (!cohort) {
+      setMessage("没有找到对应届别。");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `⚠️ 即将申请整届封存：
+
+  届别：
+  ${cohort.name}
+
+  封存后：
+  1. 该届不会再出现在默认运行列表中
+  2. 历史课程记录、留言、教学数据会保留
+  3. 不会删除账号
+  4. 后续管理员仍可以查看历史数据
+
+  确认提交封存申请吗？`
+    );
+
+    if (!confirmed) return;
+
+    handleCreateRequest({
+      actionType: "archive_cohort",
+      targetType: "cohort",
+      targetId: cohort.id,
+      targetName: cohort.name,
+      note:
+        "申请封存整届，并同步归档只属于该届的老师和学生。",
     });
   }
 
@@ -1237,25 +1290,78 @@ useEffect(() => {
 
             <button
               type="button"
-              onClick={() => {
-                const cohort = data.cohorts.find(
-                  (item) => item.id === selectedCohortId
-                );
-
-                if (!cohort) return;
-
-                handleCreateRequest({
-                  actionType: "archive_cohort",
-                  targetType: "cohort",
-                  targetId: cohort.id,
-                  targetName: cohort.name,
-                  note: "申请封存整届，并同步归档只属于该届的老师和学生。",
-                });
-              }}
+              onClick={handleCreateArchiveCohortRequest}
               className="w-fit rounded-full border border-red-200 px-5 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50"
             >
               创建整届封存申请
             </button>
+            {pendingCohortRequests.length > 0 && (
+              <div className="mt-6 space-y-3">
+                <h3 className="text-lg font-bold text-red-800">
+                  已提交的整届封存申请
+                </h3>
+
+                {pendingCohortRequests.map((request) => {
+                  const approvals =
+                    approvalsByRequestId.get(request.id) || [];
+
+                  return (
+                    <div
+                      key={request.id}
+                      className="rounded-2xl border border-red-100 bg-red-50 p-4"
+                    >
+                      <p className="font-bold text-red-800">
+                        {request.target_name}
+                      </p>
+
+                      <p className="mt-2 text-sm text-red-700">
+                        确认进度：
+                        {request.approvals_count}/
+                        {request.required_approvals}
+                      </p>
+
+                      <p className="mt-2 text-xs text-stone-500">
+                        已确认管理员：
+                        {approvals.length > 0
+                          ? approvals
+                              .map((approval) => approval.admin_name)
+                              .join("、")
+                          : "暂无"}
+                      </p>
+
+                      {request.note && (
+                        <p className="mt-2 text-xs text-stone-500">
+                          说明：
+                          {request.note}
+                        </p>
+                      )}
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleApproveRequest(request.id)
+                          }
+                          className="rounded-full bg-[#2f5d50] px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900"
+                        >
+                          确认一次
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCancelRequest(request.id)
+                          }
+                          className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
+                        >
+                          取消申请
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </section>
       </section>

@@ -823,13 +823,13 @@ function TeacherHomeContent() {
 
                 {!teacherProfile.subject && (
                   <div className="mt-5 rounded-2xl bg-red-50 p-4 text-sm leading-7 text-red-700">
-                    你的账号还没有设置教学学科。请联系管理员补全，否则后续分班和提交记录可能需要人工检查。
+                    你的账号还没有设置教学学科。请联系管理员。
                   </div>
                 )}
 
                 {subjectConflictClasses.length > 0 && (
                   <div className="mt-5 rounded-2xl bg-red-50 p-4 text-sm leading-7 text-red-700">
-                    检测到你负责的当前班级中，有班级学科和你的教学学科不一致。请联系管理员检查班级绑定。
+                    检测到你负责的当前班级中，有班级学科和你的教学学科不一致。请联系管理员检查。
                   </div>
                 )}
               </section>
@@ -984,9 +984,6 @@ function TeacherHomeContent() {
                   当前教学目标
                 </h2>
 
-                <p className="mt-3 leading-7 text-stone-600">
-                  这里显示还在进行中的阶段目标。结束后的目标会进入全部目标记录。
-                </p>
 
                 <div className="mt-8">
                   {goalsWithProgress.length === 0 ? (
@@ -1128,10 +1125,6 @@ function TeacherHomeContent() {
                     <h2 className="text-3xl font-bold text-emerald-950">
                       最近授课记录
                     </h2>
-
-                    <p className="mt-3 leading-7 text-stone-600">
-                      这里显示当前小老师最近填写的课程记录。
-                    </p>
                   </div>
 
                   <Link
@@ -1146,7 +1139,7 @@ function TeacherHomeContent() {
                   {lessonRecords.length === 0 ? (
                     <div className="rounded-2xl border border-emerald-100 bg-[#fffdf4] p-6">
                       <p className="leading-7 text-stone-600">
-                        目前还没有授课记录。添加一条记录后，这里会自动显示。
+                        目前还没有授课记录。
                       </p>
                     </div>
                   ) : (

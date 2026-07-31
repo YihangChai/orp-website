@@ -15,8 +15,7 @@ import type {
 } from "@/lib/admin-import/types";
 
 const sampleText = `届别	班级名称	合作学校	学科	小老师姓名	小老师邮箱后缀	学生名单	学生年级
-2025-2026	秋叶班	河北某小学	英语	柴一航	24	小明、小红、小刚	四年级
-2025-2026	小溪班	河北某小学	数学	薛喆天	24	小亮、小雨	五年级`;
+20xx-20xx	xx班	xx小学	英语	xxx	xx	xx、xx、xx	x年级`
 
 function safeText(value: unknown) {
   if (typeof value === "string") return value.trim();
@@ -186,11 +185,6 @@ function AdminImportContent() {
     setIsPreviewOpen(true);
   }
 
-  function handleUseSample() {
-    setImportText(sampleText);
-    setHasParsed(false);
-    resetImportState();
-  }
 
   function handleClear() {
     setImportText("");
@@ -311,10 +305,6 @@ function AdminImportContent() {
             <h1 className="mt-2 text-3xl font-bold text-emerald-950">
               批量导入账号与班级
             </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-              这里用于正常开班导入。管理员粘贴分班文本后，先预览真实班级、小老师和学生名单；确认无误后直接创建届别、班级、老师账号、学生账号和绑定关系。
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -348,23 +338,16 @@ function AdminImportContent() {
               </h2>
 
               <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-600">
-                从 Excel 或 Google Sheets 复制表格后粘贴到这里。推荐列顺序：
+                顺序：
                 <span className="font-semibold text-emerald-800">
                   {" "}
                   届别、班级名称、合作学校、学科、小老师姓名、小老师邮箱后缀、学生名单、学生年级
                 </span>
-                。学科请填写“英语”或“数学”。系统存储时会保存为 english / math，页面显示为中文。
+                。
               </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleUseSample}
-                className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-              >
-                使用示例
-              </button>
 
               <button
                 type="button"
@@ -390,24 +373,13 @@ function AdminImportContent() {
 
               <div className="mt-2 space-y-2">
                 <p>
-                  学科会写入班级和老师：
                   <span className="font-semibold text-emerald-800">
                     {" "}
-                    英语 → english，数学 → math
-                  </span>
-                  。学生不单独存学科，学生学科由所在班级推导。
-                </p>
-
-                <p>
-                  小老师姓名 + 邮箱后缀 → 拼音 + 后缀 → 学校邮箱。
-                  <span className="font-semibold text-emerald-800">
-                    {" "}
-                    柴一航 + 24 → chaiyihang24@shphschool.com
+                    张三 + 24 → zhangsan24@shphschool.com
                   </span>
                 </p>
 
                 <p>
-                  学生姓名 → 拼音用户名 → ORP 内部登录邮箱，例如：
                   <span className="font-semibold text-emerald-800">
                     {" "}
                     小明 → xiaoming / xiaoming@orp.local
@@ -513,7 +485,6 @@ function ImportPreviewSection({
   uniqueStudentCount,
   studentSeatCount,
   cohortNames,
-  subjectNames,
   isPreviewOpen,
   onTogglePreview,
 }: ImportPreviewSectionProps) {
@@ -524,7 +495,7 @@ function ImportPreviewSection({
           <h2 className="text-xl font-bold text-emerald-950">导入预览</h2>
 
           <p className="mt-2 text-sm leading-7 text-stone-600">
-            这里展示系统解析后的真实班级、学科、小老师、学生名单和自动生成账号。正式导入前，请逐行确认，尤其注意学科、重名学生、重名老师和班级名。
+            正式导入前，请逐行确认。
           </p>
         </div>
 
@@ -575,7 +546,7 @@ function ImportPreviewSection({
         </p>
       ) : (
         <>
-          <div className="mt-5 grid gap-3 sm:grid-cols-6">
+          <div className="mt-5 grid gap-3 sm:grid-cols-5">
             <div className="rounded-2xl bg-[#fffdf4] p-4">
               <p className="text-sm text-stone-500">届别</p>
 
@@ -585,16 +556,6 @@ function ImportPreviewSection({
 
               <p className="mt-1 text-xs leading-5 text-stone-500">
                 {cohortNames.join("、")}
-              </p>
-            </div>
-
-            <div className="rounded-2xl bg-[#fffdf4] p-4">
-              <p className="text-sm text-stone-500">学科</p>
-              <p className="mt-1 text-3xl font-bold text-emerald-950">
-                {subjectNames.length}
-              </p>
-              <p className="mt-1 text-xs leading-5 text-stone-500">
-                {subjectNames.join("、")}
               </p>
             </div>
 
@@ -725,14 +686,6 @@ function ImportPreviewSection({
               </table>
             </div>
           )}
-
-          <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm leading-7 text-amber-800">
-            <p className="font-bold">导入确认规则</p>
-
-            <p className="mt-1">
-              点击确认导入后，系统会直接创建届别、班级、老师账号、学生账号和班级绑定关系。创建属于正常开班流程，不需要多管理员确认。后续修改、移除、删除/封存、整届封存、密码重置才进入维护中心审批。
-            </p>
-          </div>
         </>
       )}
     </section>

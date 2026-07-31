@@ -311,11 +311,6 @@ function TeacherGoalsContent() {
     };
   }, [teacherId]);
 
-  /* =========================
-     7. 稳定的页面数据
-     ========================= */
-
-  const teacherClass = pageData?.teacherClass ?? null;
 
   /**
    * 没有数据时使用文件顶部定义的固定空数组，
@@ -326,7 +321,7 @@ function TeacherGoalsContent() {
   const comments = pageData?.comments ?? EMPTY_COMMENTS;
 
   /* =========================
-     8. 派生数据
+     7. 派生数据
      ========================= */
 
   /**
@@ -388,7 +383,7 @@ function TeacherGoalsContent() {
   }, [goals, records]);
 
   /* =========================
-     9. 加载状态
+     8. 加载状态
      ========================= */
 
   if (isLoading) {
@@ -413,7 +408,7 @@ function TeacherGoalsContent() {
   }
 
   /* =========================
-     10. 页面渲染
+     9. 页面渲染
      ========================= */
 
   return (
@@ -435,14 +430,6 @@ function TeacherGoalsContent() {
           <h1 className="mt-2 text-4xl font-bold text-emerald-950">
             全部目标与授课记录
           </h1>
-
-          <p className="mt-4 max-w-3xl leading-8 text-stone-600">
-            这里保存你创建过的所有教学目标，以及所有已经提交的授课记录。当前班级：
-            <span className="font-semibold text-emerald-800">
-              {teacherClass?.name || "未读取到班级"}
-            </span>
-            。
-          </p>
         </div>
 
         {/* 错误或提示信息 */}
@@ -459,9 +446,6 @@ function TeacherGoalsContent() {
               全部目标
             </h2>
 
-            <p className="mt-2 leading-7 text-stone-600">
-              这里列出当前小老师在当前班级下的所有教学目标。进度按照该目标下已经提交的授课记录数量计算。
-            </p>
           </div>
 
           <div className="mt-5 overflow-hidden rounded-2xl border border-emerald-100 bg-[#fffdf4]">
@@ -592,10 +576,6 @@ function TeacherGoalsContent() {
             <h2 className="text-2xl font-bold text-emerald-950">
               全部授课记录
             </h2>
-
-            <p className="mt-2 leading-7 text-stone-600">
-              默认只显示每节课的标题、简短内容和目标标签。点击展开后，可以查看上课时间、课程内容、作业、下节课计划、材料链接、小老师反思和学生留言。
-            </p>
           </div>
 
           <div className="mt-6">

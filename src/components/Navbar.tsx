@@ -15,7 +15,6 @@ export default function Navbar() {
         <Link href="/stories">我和 ORP 的故事</Link>
         <Link href="/resources">免费资源</Link>
         <Link href="/join">加入我们</Link>
-        <Link href="/donation">资助我们</Link>
       </nav>
       
       <AccountMenu />

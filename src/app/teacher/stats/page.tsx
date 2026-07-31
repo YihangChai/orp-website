@@ -694,10 +694,6 @@ function TeacherStatsContent() {
               教学旅程
             </h2>
 
-            <p className="mt-2 text-sm leading-7 text-stone-600">
-              这些不是冰冷的数据，而是你每个月持续出现、持续陪伴学生的痕迹。
-            </p>
-
             <div className="mt-5 overflow-hidden rounded-2xl border border-emerald-100 bg-[#fffdf4]">
               {monthlyStats.length === 0 ? (
                 <div className="p-4">
@@ -747,7 +743,7 @@ function TeacherStatsContent() {
                               {
                                 monthStat.lessonCount
                               }{" "}
-                              次出现
+                              次陪伴
                             </p>
                           </div>
                         </article>
@@ -900,10 +896,6 @@ function TeacherStatsContent() {
               最近教学轨迹
             </h2>
 
-            <p className="mt-2 text-sm leading-7 text-stone-600">
-              最近几节课留下的主题，帮助你快速想起自己和学生讲到哪里。
-            </p>
-
             <div className="mt-5 space-y-3">
               {recentRecords.length === 0 ? (
                 <p className="rounded-2xl bg-[#fffdf4] p-4 text-sm leading-7 text-stone-600">
@@ -942,7 +934,7 @@ function TeacherStatsContent() {
             </h2>
 
             <p className="mt-2 text-sm leading-7 text-stone-600">
-              真正重要的不只是上了几节课，也包括学生有没有回应，以及你有没有在教学中慢慢形成自己的方法。
+              真正重要的不只是上了几节课，也包括学生有没有回应，以及有没有在教学中慢慢形成自己的方法。
             </p>
 
             <div className="mt-5 grid gap-3 md:grid-cols-2">
