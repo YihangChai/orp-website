@@ -18,17 +18,17 @@ function getDashboardPath(role: "teacher" | "student" | "admin") {
 const stats = [
   {
     label: "累计授课时长",
-    value: "500+",
+    value: "约3925+",
     unit: "小时",
   },
   {
-    label: "服务学生",
-    value: "80+",
+    label: "累计服务学生",
+    value: "约640+",
     unit: "人",
   },
   {
-    label: "参与小老师",
-    value: "30+",
+    label: "累计参与小老师",
+    value: "约320+",
     unit: "人",
   },
 ];
@@ -36,19 +36,19 @@ const stats = [
 //首页的ORP基本模块化介绍，简洁明了
 const features = [
   {
-    title: "线上阅读陪伴",
+    title: "稳定的线上课堂",
     description:
-      "这里之后填写 ORP 如何通过线上课程陪伴河北小学学生阅读、表达和讨论。",
+      "志愿小老师每周开展英语与数学课程，根据学生的年级、基础和学习进度准备课堂内容。在知识讲解之外，我们也通过阅读、表达和互动讨论，让学生能够主动参与课堂，拓展知识。",
   },
   {
     title: "持续课程记录",
     description:
-      "这里之后填写小老师如何记录每次课程内容、学生表现和下一步教学计划。",
+      "每次授课结束后，小老师会记录课程内容、学生表现、作业安排与下一步计划，让后续课堂建立在真实的学习进度之上，而不是每次重新开始。",
   },
   {
-    title: "学生成长反馈",
+    title: "双向的成长反馈",
     description:
-      "这里之后填写 ORP 如何通过反馈和数据帮助课程持续改进。",
+      "学生可以通过留言和反馈表达自己的感受，小老师也会在备课、授课与课后反思中持续调整教学。长期、稳定的互动，让课堂不仅传递知识，也建立理解、信任与陪伴。",
   },
 ];
 
@@ -85,12 +85,11 @@ export default function HomePage() {
             </p>
 
             <h1 className="mt-6 text-5xl font-bold leading-tight tracking-tight text-white md:text-7xl">
-              一段大大的介绍
+              ORP公益社团
             </h1>
 
             <p className="mt-7 max-w-2xl text-lg leading-8 text-emerald-50 md:text-xl">
-              ORP 是一个由学生主导的线上阅读陪伴项目。我们连接小老师与河北小学学生，
-              通过持续课程、阅读讨论和成长记录，让每一次线上相遇都成为长期支持的一部分。
+              ORP（Online Reading Partner）是由学生自主运营的线上公益教育项目。我们联结校内志愿小老师与河北小学三至六年级学生，通过长期、稳定的数学与英语课堂，为孩子们提供知识学习、阅读交流与持续陪伴。课堂之外，我们也创作原创英文绘本、开展公益活动，让教育与创意跨越地域相遇。
             </p>
 {/* 
 后续接入登录系统后：
@@ -110,7 +109,7 @@ export default function HomePage() {
                 href="/about"
                 className="rounded-full bg-[#cfe8d6] px-7 py-3 text-base font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8]"
               >
-                了解 ORP
+                了解更多
               </Link>
             )}
           </div>
@@ -127,14 +126,13 @@ export default function HomePage() {
                 Our Impact
               </p>
 
-              <h2 className="mt-4 text-3xl font-bold leading-tight text-emerald-950 md:text-5xl">
-                一段我们的impact介绍
+              <h2 className="mt-4 text-3xl font-semibold leading-tight text-emerald-950 md:text-5xl">
+                我们的影响
               </h2>
             </div>
 
             <p className="leading-8 text-stone-700">
-              这里之后可以用一小段话说明这些数据的意义：它们不仅是数字，
-              也代表小老师投入的时间、学生参与的过程，以及 ORP 持续运行的成果。
+              从2018年运营至今，我们已达成单学年47名志愿授课教师累计完成490.7小时公益教学，稳定服务超100名河北三至六年级学生，以长期稳定的公益实践，给不同地区的孩子带去多元的学习体验。
             </p>
           </div>
 
@@ -167,19 +165,13 @@ export default function HomePage() {
             </p>
 
             <h2 className="mt-5 text-3xl font-bold leading-tight md:text-5xl">
-              一段我们mission的介绍
+              我们的Mission
             </h2>
           </div>
 
           <div className="space-y-5 text-lg leading-9 text-emerald-50">
             <p>
-              这里之后可以填写 ORP 的核心使命：为什么阅读陪伴需要长期发生，
-              为什么课程记录和学生反馈能让线上教学变得更稳定。
-            </p>
-
-            <p>
-              这一块不需要写很多，但要写得真诚、有力量，让访客理解 ORP 不只是一个活动，
-              而是一个持续改进的公益项目。
+              我们的核心工作是线上教学与长期陪伴，开设英语、数学两类课程；团队自制温情英文绘本丰富课堂素材，把课内知识点融入生活化趣味话题，降低学习的枯燥感。我们跨越地域距离，完整记录每位学生的学习成长轨迹，以志愿热忱带来高质量、有新意的线上教学体验。
             </p>
           </div>
         </div>
@@ -195,12 +187,11 @@ export default function HomePage() {
               </p>
 
               <h2 className="mt-5 text-3xl font-bold leading-tight text-emerald-950 md:text-5xl">
-                一段what we do的介绍
+                我们如何让陪伴持续发生
               </h2>
 
               <p className="mt-6 leading-8 text-stone-700">
-                这里之后可以用一小段话解释 ORP 的基本工作方式：
-                小老师如何上课，学生如何参与，管理团队如何通过记录和反馈持续优化课程。
+                ORP 以长期、稳定的线上教学为核心，由校内志愿小老师为河北小学三至六年级学生开展英语与数学课程。我们通过备课、授课、课程记录与反馈复盘，让每一堂课都承接学生真实的学习进度，也让一次次线上相遇逐渐沉淀为持续的陪伴。
               </p>
             </div>
 
@@ -228,7 +219,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* 首页第五部分，ORP故事预览 */}
+      {/* 首页第五部分，ORP故事预览
       <section className="bg-[#edf3df]">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
@@ -280,7 +271,7 @@ export default function HomePage() {
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* 首页第六部分，了解更多 */}
       <section className="bg-[#f6f5e9]">
