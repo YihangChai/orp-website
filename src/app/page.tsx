@@ -52,19 +52,6 @@ const features = [
   },
 ];
 
-const stories = [
-  {
-    title: "ORP 故事标题 1",
-    description:
-      "这里之后可以填写来自小老师、学生、家长或项目管理者的故事摘要。",
-  },
-  {
-    title: "ORP 故事标题 2",
-    description:
-      "这里之后可以填写另一段项目故事摘要，让访客感受到 ORP 背后真实的人和经历。",
-  },
-];
-
 export default function HomePage() {
   return (
     <main className="bg-[#f6f5e9] text-stone-800">

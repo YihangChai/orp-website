@@ -49,7 +49,7 @@ export default function DepartmentsPage() {
       <section className="mx-auto max-w-6xl px-6 pb-24">
         <div className="space-y-8">
 
-          {departments.map((department, index) => (
+          {departments.map((department) => (
             <section
               key={department.name}
               className="rounded-[2rem] border border-emerald-100 bg-white p-8 shadow-sm md:p-12"
