@@ -1,19 +1,5 @@
 import Link from "next/link";
-//模拟登录后页面变化后续链接数据库后修改
-const isLoggedIn = false;
-const userRole: "teacher" | "student" | "admin" = "teacher";
 
-function getDashboardPath(role: "teacher" | "student" | "admin") {
-  if (role === "admin") {
-    return "/admin";
-  }
-
-  if (role === "student") {
-    return "/student";
-  }
-
-  return "/teacher";
-}
 //成果展示（累计授课时长，服务学生和参加的小老师）
 const stats = [
   {
@@ -72,41 +58,19 @@ export default function HomePage() {
             </p>
 
             <h1 className="mt-6 text-5xl font-bold leading-tight tracking-tight text-white md:text-7xl">
-              ORP公益社团
+              ORP伙伴阅读项目
             </h1>
 
             <p className="mt-7 max-w-2xl text-lg leading-8 text-emerald-50 md:text-xl">
               ORP（Online Reading Partner）是由学生自主运营的线上公益教育项目。我们联结校内志愿小老师与河北小学三至六年级学生，通过长期、稳定的数学与英语课堂，为孩子们提供知识学习、阅读交流与持续陪伴。课堂之外，我们也创作原创英文绘本、开展公益活动，让教育与创意跨越地域相遇。
             </p>
-{/* 
-后续接入登录系统后：
-未登录用户显示“了解 ORP”
-已登录用户显示“进入系统”，并根据角色跳转到 /teacher、/student 或 /admin
-*/}
-          <div className="mt-10 flex flex-wrap gap-4">
-            {isLoggedIn ? (
-              <Link
-                href={getDashboardPath(userRole)}
-                className="rounded-full bg-[#cfe8d6] px-7 py-3 text-base font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8]"
-              >
-                进入系统
-              </Link>
-            ) : (
-              <Link
-                href="/about"
-                className="rounded-full bg-[#cfe8d6] px-7 py-3 text-base font-semibold text-emerald-950 shadow-sm hover:bg-[#bfe0c8]"
-              >
-                了解更多
-              </Link>
-            )}
-          </div>
         </div>
         </div>
       </section>
 
       {/* 首页第二部分，成果展示 */}
-      <section className="bg-[#f6f5e9]">
-        <div className="mx-auto max-w-6xl px-6 py-16">
+      {/* <section className="bg-[#f6f5e9]"> */}
+        {/* <div className="mx-auto max-w-6xl px-6 py-16">
           <div className="grid gap-10 md:grid-cols-[0.9fr_1.1fr] md:items-end">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-700">
@@ -121,9 +85,9 @@ export default function HomePage() {
             <p className="leading-8 text-stone-700">
               从2018年运营至今，我们已达成单学年47名志愿授课教师累计完成490.7小时公益教学，稳定服务超100名河北三至六年级学生，以长期稳定的公益实践，给不同地区的孩子带去多元的学习体验。
             </p>
-          </div>
+          </div> */}
 
-          <div className="mt-12 grid gap-6 border-y border-emerald-200 py-10 md:grid-cols-3">
+          {/* <div className="mt-12 grid gap-6 border-y border-emerald-200 py-10 md:grid-cols-3">
             {stats.map((item) => (
               <div key={item.label}>
                 <p className="text-5xl font-bold text-emerald-800 md:text-6xl">
@@ -141,7 +105,7 @@ export default function HomePage() {
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* 首页第三部分，深色使命区：适量深色色块，不要过度 */}
       <section className="bg-[#2f5d50] text-white">
@@ -289,4 +253,3 @@ export default function HomePage() {
     </main>
   );
 }
-//把our mission加到关于我们里面，这样首页干净一点
