@@ -670,7 +670,7 @@ function AdminHomeContent() {
       subtitle: "小老师",
       description: teacher.email
         ? `邮箱：${teacher.email}`
-        : "暂未填写邮箱。后续可以在小老师管理页补充更多信息。",
+        : "暂未填写邮箱。",
       status: getStatusLabel(teacher.status || "active"),
       href: `/admin/teachers/${teacher.id}`,
     }));
@@ -682,7 +682,7 @@ function AdminHomeContent() {
       subtitle: "学生",
       description:
         student.note ||
-        "暂未填写学生备注。后续可以在学生详情页查看学习情况。",
+        "暂未填写学生备注。",
       status: getStatusLabel(student.status || "active"),
       href: `/admin/students/${student.id}`,
     }));
@@ -749,7 +749,7 @@ function AdminHomeContent() {
     const activeKeyword = searchTerm.trim().toLowerCase();
 
     if (!activeKeyword) {
-      setSearchMessage("请先输入搜索关键词。");
+      setSearchMessage("请输入搜索关键词。");
       setSearchResults([]);
       setHasSearched(false);
       return;
@@ -857,7 +857,7 @@ function AdminHomeContent() {
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
               <div>
                 <h2 className="mt-2 text-3xl font-bold text-emerald-950">
-                  ORP 运营总览
+                  ORP 总览
                 </h2>
               </div>
 
@@ -1019,7 +1019,7 @@ function AdminHomeContent() {
 
             {pendingRequests.length === 0 ? (
               <div className="mt-5 rounded-2xl bg-[#fffdf4] p-5 text-sm leading-7 text-stone-600">
-                目前没有待处理的高风险操作申请。
+                暂无
               </div>
             ) : (
               <div className="mt-5 space-y-3">

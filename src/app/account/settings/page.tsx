@@ -151,7 +151,7 @@ export default function AccountSettingsPage() {
 
       setNewPassword("");
       setConfirmPassword("");
-      setMessage("密码修改成功。下次登录请使用新密码。");
+      setMessage("密码修改成功。");
     } catch (error) {
       const errorText =
         error instanceof Error ? error.message : "密码修改失败，请稍后再试。";
@@ -188,7 +188,7 @@ export default function AccountSettingsPage() {
             </h1>
 
             <p className="mt-3 max-w-2xl text-sm leading-7 text-stone-600">
-              这里用于管理你的登录账号。当前先支持可选修改密码，后续可以继续加入昵称、通知、账号安全等功能。
+              这里用于管理你的登录账号。
             </p>
           </div>
 
@@ -219,7 +219,7 @@ export default function AccountSettingsPage() {
             <h2 className="text-2xl font-bold text-emerald-950">修改密码</h2>
 
             <p className="mt-3 max-w-2xl text-sm leading-7 text-stone-600">
-              如果你想把初始密码改成自己更方便记忆的密码，可以在这里修改。修改成功后，下次登录需要使用新密码。
+              可修改密码。
             </p>
           </div>
 

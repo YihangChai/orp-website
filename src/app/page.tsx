@@ -58,7 +58,7 @@ export default function HomePage() {
             </p>
 
             <h1 className="mt-6 text-5xl font-bold leading-tight tracking-tight text-white md:text-7xl">
-              ORP伙伴阅读项目
+              ORP项目
             </h1>
 
             <p className="mt-7 max-w-2xl text-lg leading-8 text-emerald-50 md:text-xl">
@@ -250,6 +250,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+      <div>
+        浙ICP备2026076900号-1
+      </div>
     </main>
   );
 }

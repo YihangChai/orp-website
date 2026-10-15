@@ -470,7 +470,7 @@ function AdminMessagesContent() {
                   <p className="font-bold">MVP 提醒</p>
 
                   <p className="mt-1">
-                    这个按钮目前只做界面预留，不会真的发布。正式上线前需要确认授权、去除敏感信息，并新增审核/发布记录表。
+                    
                   </p>
                 </div>
 
@@ -480,7 +480,7 @@ function AdminMessagesContent() {
                     disabled
                     className="cursor-not-allowed rounded-full bg-stone-200 px-4 py-2 text-sm font-semibold text-stone-500"
                   >
-                    模拟发布到首页故事区
+                    
                   </button>
 
                   <button
@@ -488,7 +488,7 @@ function AdminMessagesContent() {
                     disabled
                     className="cursor-not-allowed rounded-full bg-stone-200 px-4 py-2 text-sm font-semibold text-stone-500"
                   >
-                    模拟发布到“我和 ORP 的故事”
+                    
                   </button>
 
                   <button
@@ -496,7 +496,7 @@ function AdminMessagesContent() {
                     onClick={() => setSelectedMessage(null)}
                     className="rounded-full border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 transition hover:bg-stone-50"
                   >
-                    清空准备区
+                    
                   </button>
                 </div>
               </div>

@@ -777,8 +777,7 @@ function AdminStatisticsContent() {
                 </p>
 
                 <p className="mt-2 text-sm leading-7 text-stone-600">
-                  当前系统收集到 {statistics.messageCount} 条学生、家长或老师反馈。
-                  这些内容可以进入留言中心，用于后续整理成 ORP 故事素材。
+                  当前系统收集到 {statistics.messageCount} 条学生、家长或老师反馈。                  
                 </p>
 
                 <Link
